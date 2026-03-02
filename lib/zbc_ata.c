@@ -761,7 +761,8 @@ static int zbc_ata_report_realms(struct zbc_device *dev, uint64_t sector,
 	uint8_t const *buf, *ptr;
 	uint64_t zone_size, next, lba = zbc_dev_sect2lba(dev, sector);
 	size_t bufsz = ZBC_RPT_REALMS_HEADER_SIZE;
-	unsigned int i, nr = 0, nr_filled = 0, desc_len;
+	bool fill_realms = realms != NULL;
+	unsigned int i, nr = 0, nr_filled = 0, nr_total = 0, nr_avail, desc_len;
 	struct zbc_sg_cmd cmd;
 	int ret, j, nr_domains;
 
@@ -864,9 +865,17 @@ static int zbc_ata_report_realms(struct zbc_device *dev, uint64_t sector,
 		/* Get the number of realm descriptors from the header */
 		buf = cmd.buf;
 		nr = zbc_ata_get_dword(&buf[0]);
+		if (!nr_total)
+			nr_total = nr;
 
-		if (!realms || !nr) {
+		if (!nr) {
 			zbc_sg_cmd_destroy(&cmd);
+			goto out;
+		}
+		if (!fill_realms) {
+			/* Only reporting the number of realms */
+			zbc_sg_cmd_destroy(&cmd);
+			ret = 0;
 			goto out;
 		}
 
@@ -880,10 +889,10 @@ static int zbc_ata_report_realms(struct zbc_device *dev, uint64_t sector,
 				goto oldrealms; /* The field is reserved pre ZDr4, so it has to be 0 */
 			next = zbc_ata_get_qword(&buf[8]);
 
-			bufsz = (cmd.bufsz - ZBC_RPT_REALMS_HEADER_SIZE) /
-				desc_len;
-			if (nr > bufsz)
-				nr = bufsz;
+			nr_avail = (cmd.bufsz - ZBC_RPT_REALMS_HEADER_SIZE) /
+				   desc_len;
+			if (nr > nr_avail)
+				nr = nr_avail;
 
 			/* Get zone realm descriptors */
 			buf += ZBC_RPT_REALMS_HEADER_SIZE;
@@ -940,10 +949,10 @@ static int zbc_ata_report_realms(struct zbc_device *dev, uint64_t sector,
 			desc_len = ZBC_RPT_REALMS_RECORD_SIZE;
 		} else {
 			desc_len = ZBC_RPT_REALMS_RECORD_SIZE;
-			bufsz = (cmd.bufsz - ZBC_RPT_REALMS_HEADER_SIZE) /
-				desc_len;
-			if (nr > bufsz)
-				nr = bufsz;
+			nr_avail = (cmd.bufsz - ZBC_RPT_REALMS_HEADER_SIZE) /
+				   desc_len;
+			if (nr > nr_avail)
+				nr = nr_avail;
 		}
 
 		/* Get zone realm descriptors (legacy path) */
@@ -998,7 +1007,10 @@ out:
 		free(domains);
 
 	/* Return the number of descriptors */
-	*nr_realms = nr_filled;
+	if (fill_realms)
+		*nr_realms = nr_filled;
+	else
+		*nr_realms = nr_total;
 
 	return ret;
 }
