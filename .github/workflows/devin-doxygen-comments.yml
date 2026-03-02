@@ -10,26 +10,28 @@ on:
         required: false
         default: ""
 
-  push:
+  pull_request:
     branches:
       - master
+    types:
+      - opened
 
 # Branch naming convention for Devin sessions spawned by this action:
 #   devin/gha-doxygen-*
-# When such a branch is merged to master, the workflow detects the pattern
-# in the merge commit message and skips, preventing an infinite loop.
+# When a PR is opened from such a branch, the workflow detects the pattern
+# in the head branch name and skips, preventing an infinite loop.
 
 jobs:
   trigger-devin:
     runs-on: ubuntu-latest
     steps:
-      - name: Check for Devin-authored merge and skip if so
+      - name: Check for Devin-authored PR and skip if so
         id: loop-guard
         env:
-          COMMIT_MSG: ${{ github.event.head_commit.message }}
+          HEAD_BRANCH: ${{ github.head_ref }}
         run: |
-          if echo "$COMMIT_MSG" | grep -qiE 'devin/gha-doxygen-'; then
-            echo "Skipping: this push is from a Devin-created doxygen PR."
+          if echo "$HEAD_BRANCH" | grep -qE '^devin/gha-doxygen-'; then
+            echo "Skipping: this PR was created by a Devin doxygen session."
             echo "skip=true" >> "$GITHUB_OUTPUT"
           else
             echo "skip=false" >> "$GITHUB_OUTPUT"
