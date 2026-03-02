@@ -5,8 +5,28 @@
 # zbc_realm_lib.sh — Realm-related helper functions for the ZBC test suite.
 # Sourced by zbc_test_lib.sh; do not execute directly.
 
+## @file zbc_realm_lib.sh
+## @brief Realm-related helper functions for the ZBC/ZAC test suite.
+##
+## This shell library provides functions for querying, searching, and
+## inspecting zone realms on XMR (cross-managed-resource) devices.
+## It is sourced by zbc_test_lib.sh and should not be executed directly.
+##
+## @note All functions in this file operate on global shell variables
+##       populated by the test harness (e.g. zone_realm_info_file,
+##       nr_realms, realm_* arrays).
+
 # Zone realm manipulation functions
 
+## @brief Retrieve zone realm information for the current device.
+##
+## Determines the CMR and SMR zone type strings based on the device
+## capabilities, executes zbc_test_report_realms to populate the
+## zone_realm_info_file, and counts total realms and activation
+## categories.
+##
+## @return 0 on success; exits via zbc_test_print_not_applicable if
+##         the device lacks conventional or sequential zone support.
 function zbc_test_get_zone_realm_info()
 {
 	if [ ${report_realms} -eq 0 ]; then
@@ -43,6 +63,11 @@ function zbc_test_get_zone_realm_info()
 	return 0
 }
 
+## @brief Count the total number of zone realms reported by the device.
+##
+## Parses zone_realm_info_file for ZONE_REALM_INFO entries and stores
+## the count in the global variable nr_realms.  Exits with failure if
+## the device is a Zone Domains device yet reports zero realms.
 function _zbc_test_count_zone_realms()
 {
 	nr_realms=`cat ${zone_realm_info_file} | grep "\[ZONE_REALM_INFO\]" | wc -l`
@@ -54,6 +79,10 @@ function _zbc_test_count_zone_realms()
 	fi
 }
 
+## @brief Count realms that can be activated as conventional.
+##
+## Parses the actv_as_conv column (field 9) from zone_realm_info_file
+## and stores the count of "Y" entries in nr_actv_as_conv_realms.
 function _zbc_test_count_actv_as_conv_realms()
 {
 	local _IFS="${IFS}"
@@ -61,6 +90,10 @@ function _zbc_test_count_actv_as_conv_realms()
 	IFS="$_IFS"
 }
 
+## @brief Count realms that can be activated as sequential.
+##
+## Parses the actv_as_seq column (field 10) from zone_realm_info_file
+## and stores the count of "Y" entries in nr_actv_as_seq_realms.
 function _zbc_test_count_actv_as_seq_realms()
 {
 	local _IFS="${IFS}"
@@ -68,8 +101,17 @@ function _zbc_test_count_actv_as_seq_realms()
 	IFS="$_IFS"
 }
 
-# Return non-zero if a realm found by zbc_test_search_* has zones R/O or offline
-# Destroys target_zone information, so re-get the zone if you need it after calling here.
+## @brief Check whether the currently-found realm contains faulty zones.
+##
+## Iterates over every domain in the realm previously located by a
+## zbc_test_search_* call and inspects each zone's condition.  A realm
+## is considered faulty if any of its zones are read-only or offline.
+##
+## @note Destroys target_zone information; re-get the zone after
+##       calling if needed.
+##
+## @return 0 if the realm is healthy (or test_faulty checking is
+##         disabled); 1 if any zone is read-only or offline.
 function zbc_test_is_found_realm_faulty()
 {
 	local _target_slba
@@ -104,6 +146,17 @@ function zbc_test_is_found_realm_faulty()
 	return 0
 }
 
+## @brief Parse a single domain-specific realm item into global arrays.
+##
+## Splits a colon-delimited item string and stores the domain type,
+## start LBA, end LBA, and length into the corresponding realm_*
+## arrays at the given domain index.
+##
+## @param $1 Domain index (integer) within the realm.
+## @param $2 Colon-delimited item string of the form
+##           "type:start_lba:end_lba:length".
+##
+## @return 0 always.
 function zbc_parse_realm_item()
 {
 	local _ifs="${IFS}"
@@ -120,9 +173,19 @@ function zbc_parse_realm_item()
 	return 0
 }
 
-# Echo realm start LBA for a certain zone type. {1} is the type in textual form - conv|seq|seqp|sobr
-# zbc_test_search_zone_realm_by_number() or zbc_test_search_realm_by_type_and_actv() must be called
-# before attempting to call this one.
+## @brief Echo the start LBA of the current realm for a given zone type.
+##
+## Looks up the domain whose type matches the requested zone type and
+## prints its start LBA to stdout.
+##
+## @pre zbc_test_search_zone_realm_by_number() or
+##      zbc_test_search_realm_by_type_and_actv() must have been called
+##      to populate the realm_* arrays.
+##
+## @param $1 Zone type in textual form: "conv", "seq", "seqp", or "sobr".
+##
+## @return 0 if the type was found and the LBA was printed;
+##         1 if no matching domain exists in the current realm.
 function zbc_realm_start()
 {
 	local -i _zt
@@ -155,19 +218,41 @@ function zbc_realm_start()
 	return 1
 }
 
+## @brief Echo the start LBA of the current realm's CMR domain.
+##
+## Convenience wrapper around zbc_realm_start() using the global
+## cmr_type variable.
+##
+## @return 0 on success; 1 if no CMR domain exists.
 function zbc_realm_cmr_start()
 {
 	zbc_realm_start "${cmr_type}"
 }
 
+## @brief Echo the start LBA of the current realm's SMR domain.
+##
+## Convenience wrapper around zbc_realm_start() using the global
+## smr_type variable.
+##
+## @return 0 on success; 1 if no SMR domain exists.
 function zbc_realm_smr_start()
 {
 	zbc_realm_start "${smr_type}"
 }
 
-# Echo realm length in zones for a certain zone type. {1} is the type in textual form - conv|seq|seqp|sobr
-# zbc_test_search_zone_realm_by_number() or zbc_test_search_realm_by_type_and_actv() must be called
-# before attempting to call this one.
+## @brief Echo the length (in zones) of the current realm for a given zone type.
+##
+## Looks up the domain whose type matches the requested zone type and
+## prints its length to stdout.
+##
+## @pre zbc_test_search_zone_realm_by_number() or
+##      zbc_test_search_realm_by_type_and_actv() must have been called
+##      to populate the realm_* arrays.
+##
+## @param $1 Zone type in textual form: "conv", "seq", "seqp", or "sobr".
+##
+## @return 0 if the type was found and the length was printed;
+##         1 if no matching domain exists in the current realm.
 function zbc_realm_len()
 {
 	local -i _zt
@@ -200,16 +285,38 @@ function zbc_realm_len()
 	return 1
 }
 
+## @brief Echo the length (in zones) of the current realm's CMR domain.
+##
+## Convenience wrapper around zbc_realm_len() using the global
+## cmr_type variable.
+##
+## @return 0 on success; 1 if no CMR domain exists.
 function zbc_realm_cmr_len()
 {
 	zbc_realm_len "${cmr_type}"
 }
 
+## @brief Echo the length (in zones) of the current realm's SMR domain.
+##
+## Convenience wrapper around zbc_realm_len() using the global
+## smr_type variable.
+##
+## @return 0 on success; 1 if no SMR domain exists.
 function zbc_realm_smr_len()
 {
 	zbc_realm_len "${smr_type}"
 }
 
+## @brief Search for a zone realm by its realm number.
+##
+## Locates the realm whose number matches the given argument in
+## zone_realm_info_file and populates the global realm_* variables
+## and arrays with its fields and per-domain information.
+##
+## @param $1 Realm number (zero-based index into the realm list).
+##
+## @return 0 if the realm was found and globals were populated;
+##         1 if the realm number is out of range or not found.
 function zbc_test_search_zone_realm_by_number()
 {
 	local realm_number=${1}
@@ -271,7 +378,16 @@ function zbc_test_search_zone_realm_by_number()
 	return 1
 }
 
-# Search for a realm containing LBA $1
+## @brief Search for the zone realm that contains a given LBA.
+##
+## Iterates over all realm entries in zone_realm_info_file and checks
+## each domain's start/end LBA range.  On a match the global realm_*
+## variables are populated with the matching realm's information.
+##
+## @param $1 Logical Block Address to search for.
+##
+## @return 0 if a realm containing the LBA was found;
+##         1 if the LBA is out of range or no realm contains it.
 function zbc_test_search_realm_by_lba()
 {
 	local _LBA=${1}
@@ -338,17 +454,44 @@ function zbc_test_search_realm_by_lba()
 	return 1
 }
 
-# Return non-zero if realm $1 has zones R/O or offline
-# Destroys target_zone and current realm information, so re-get if needed.
+## @brief Check whether a specific realm (by number) contains faulty zones.
+##
+## Looks up the realm by number and delegates to
+## zbc_test_is_found_realm_faulty() to inspect zone conditions.
+##
+## @note Destroys target_zone and current realm information; re-get
+##       if needed after calling.
+##
+## @param $1 Realm number to check.
+##
+## @return 0 if the realm is healthy; non-zero if any zone is
+##         read-only or offline.
 function zbc_test_is_realm_faulty()
 {
 	zbc_test_search_zone_realm_by_number $1
 	zbc_test_is_found_realm_faulty
 }
 
-# $1 is realm type, $2 is can_activate_as
-# Optional $3 = "NOFAULTY" specifies to skip faulty realms, and require two in a row.
-# Destroys target_zone information, so re-get the zone if you need it after calling here.
+## @brief Search for a realm matching a given type and activation capability.
+##
+## Scans zone_realm_info_file for a realm whose type matches the
+## requested value and whose activation flags satisfy the given
+## constraint.  When the NOFAULTY option is specified, the function
+## additionally ensures the found realm (and its successor) are free
+## of read-only or offline zones, providing a pair of contiguous
+## non-faulty realms suitable for write testing.
+##
+## @note Destroys target_zone information; re-get the zone after
+##       calling if needed.
+##
+## @param $1 Realm type to match (numeric type code).
+## @param $2 Activation filter keyword: "conv", "noconv", "seq",
+##           "noseq", "both", or "none".
+## @param $3 (Optional) "NOFAULTY" to skip faulty realms and require
+##           two contiguous non-faulty realms of the same type.
+##
+## @return 0 if a matching realm was found and globals were populated;
+##         1 if no realm satisfies the criteria.
 function zbc_test_search_realm_by_type_and_actv()
 {
 	local realm_search_type=${1}
@@ -476,6 +619,15 @@ function zbc_test_search_realm_by_type_and_actv()
 	return 1
 }
 
+## @brief Search for a realm by type and activation, or mark test N/A.
+##
+## Wrapper around zbc_test_search_realm_by_type_and_actv() that prints
+## a "not applicable" message and exits the test if no matching realm
+## is found.
+##
+## @param $1 Realm type to match (passed through).
+## @param $2 Activation filter keyword (passed through).
+## @param $3 (Optional) "NOFAULTY" flag (passed through).
 function zbc_test_search_realm_by_type_and_actv_or_NA()
 {
 	zbc_test_search_realm_by_type_and_actv "$@"
@@ -485,6 +637,13 @@ function zbc_test_search_realm_by_type_and_actv_or_NA()
 	fi
 }
 
+## @brief Skip the test if realm boundaries shift for the given type.
+##
+## Checks the global "<type>_shifting" flag and, if non-zero, prints a
+## "not applicable" message and exits the test.
+##
+## @param $1 Zone type prefix (e.g. "conv", "seq") used to construct
+##           the shifting flag variable name "<type>_shifting".
 function zbc_test_realm_boundaries_not_shifting_or_NA()
 {
 	local flg="$1_shifting"
@@ -495,6 +654,20 @@ function zbc_test_realm_boundaries_not_shifting_or_NA()
 	fi
 }
 
+## @brief Calculate the number of conventional and sequential zones
+##        across a range of realms.
+##
+## Starting from the given realm number, iterates over the specified
+## number of consecutive realms and accumulates zone counts by type.
+## Results are stored in the global variables nr_conv_zones and
+## nr_seq_zones.
+##
+## @param $1 Starting realm number.
+## @param $2 Number of consecutive realms to process.
+##
+## @return 0 if all requested realms were processed;
+##         1 if the realm file was exhausted before processing
+##         the requested count.
 function zbc_test_calc_nr_realm_zones()
 {
 	local _realm_num=${1}
