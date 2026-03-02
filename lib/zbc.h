@@ -271,6 +271,26 @@ extern struct zbc_drv zbc_scsi_drv;
 	((((sect) << 9) & ((dev)->zbd_info.zbd_pblock_size - 1)) == 0)
 
 /**
+ * Calculate the safe number of start/end descriptor entries that fit
+ * within a realm descriptor of the given length. Returns the minimum
+ * of @nr_domains and the number of entries that @desc_len can hold.
+ */
+static inline int zbc_realm_safe_nr_entries(unsigned int desc_len,
+					    unsigned int desc_offset,
+					    unsigned int entry_size,
+					    int nr_domains)
+{
+	int max_entries;
+
+	if (desc_len < desc_offset)
+		return 0;
+
+	max_entries = (desc_len - desc_offset) / entry_size;
+
+	return (nr_domains < max_entries) ? nr_domains : max_entries;
+}
+
+/**
  * Count total size of vector buffers.
  */
 static inline size_t zbc_iov_count(const struct iovec *iov, int iovcnt)
