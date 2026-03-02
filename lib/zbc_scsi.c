@@ -853,7 +853,7 @@ static int zbc_scsi_report_realms(struct zbc_device *dev, uint64_t sector,
 	uint8_t const *buf, *ptr;
 	uint64_t zone_size, next, lba = zbc_dev_sect2lba(dev, sector);
 	size_t bufsz = ZBC_RPT_REALMS_HEADER_SIZE;
-	unsigned int i, nr = 0, desc_len;
+	unsigned int i, nr = 0, total_nr = 0, desc_len, page_nr;
 	struct zbc_sg_cmd cmd;
 	int ret, j, nr_domains;
 
@@ -887,133 +887,151 @@ static int zbc_scsi_report_realms(struct zbc_device *dev, uint64_t sector,
 
 	bufsz = zbc_sg_align_bufsz(dev, bufsz);
 
-	/* Allocate and initialize REPORT REALMS command */
-	ret = zbc_sg_cmd_init(dev, &cmd, ZBC_SG_REPORT_REALMS, NULL, bufsz);
-	if (ret != 0) {
-		free(domains);
-		return ret;
-	}
-
-	/* Fill command CDB:
-	 * +=============================================================================+
-	 * |  Bit|   7    |   6    |   5    |   4    |   3    |   2    |   1    |   0    |
-	 * |Byte |        |        |        |        |        |        |        |        |
-	 * |=====+=======================================================================|
-	 * | 0   |                           Operation Code (95h)                        |
-	 * |-----+-----------------------------------------------------------------------|
-	 * | 1   |      Reserved            |           Service Action (06h)             |
-	 * |-----+-----------------------------------------------------------------------|
-	 * | 2   | (MSB)                                                                 |
-	 * |- - -+---                         Realm Start LBA                         ---|
-	 * | 9   |                                                                 (LSB) |
-	 * |-----+-----------------------------------------------------------------------|
-	 * | 10  | (MSB)                                                                 |
-	 * |- - -+---                        Allocation Length                        ---|
-	 * | 13  |                                                                 (LSB) |
-	 * |-----+-----------------------------------------------------------------------|
-	 * | 14  |     Reserved    |                 Reporting Options                   |
-	 * |-----+-----------------------------------------------------------------------|
-	 * | 15  |                               Control                                 |
-	 * +=============================================================================+
-	 */
-	cmd.cdb[0] = ZBC_SG_REPORT_REALMS_CDB_OPCODE;
-	cmd.cdb[1] = ZBC_SG_REPORT_REALMS_CDB_SA;
-	zbc_sg_set_int64(&cmd.cdb[2], lba);
-	zbc_sg_set_int32(&cmd.cdb[10], (unsigned int)bufsz);
-	cmd.cdb[14] = ro & 0x3f;
-
-	/* Send the SG_IO command */
-	ret = zbc_sg_cmd_exec(dev, &cmd);
-	if (ret != 0)
-		goto out;
-
-	if (cmd.bufsz < ZBC_RPT_REALMS_HEADER_SIZE) {
-		zbc_error("%s: Not enough REPORT REALMS data received"
-			  " (need at least %d B, got %zu B)\n",
-			  dev->zbd_filename,
-			  ZBC_RPT_REALMS_HEADER_SIZE,
-			  cmd.bufsz);
-		ret = -EIO;
-		goto out;
-	}
-
-	/* Get number of realm descriptors from the header */
-	buf = cmd.buf;
-	nr = zbc_sg_get_int32(&buf[4]);
-
-	if (!realms || !nr)
-		goto out;
-
-	/* Get the number of realm descriptors to fill */
-	if (nr > *nr_realms)
-		nr = *nr_realms;
-
-	if (!(dev->zbd_info.zbd_flags & ZBC_STANDARD_RPT_REALMS)) {
-		zbc_error("%s: REPORT REALMS is not supported by device",
-			  dev->zbd_filename);
-		ret = -ENXIO;
-		goto out;
-	}
-
-	desc_len = zbc_sg_get_int32(&buf[8]);
-	next = zbc_sg_get_int64(&buf[12]);
-	if (next) {
-		zbc_error("%s: NEXT REALM LOCATOR is not yet supported",
-			  dev->zbd_filename);
-		ret = -ENXIO; /* FIXME handle */
-		goto out;
-	}
-
-	bufsz = (cmd.bufsz - ZBC_RPT_REALMS_HEADER_SIZE) / desc_len;
-	if (nr > bufsz)
-		nr = bufsz;
-
-	/* Get zone realm descriptors */
-	buf += ZBC_RPT_REALMS_HEADER_SIZE;
-	for (i = 0; i < nr; i++, realms++) {
-		realms->zbr_number = zbc_sg_get_int32(buf);
-		realms->zbr_restr = zbc_sg_get_int16(&buf[4]);
-		realms->zbr_dom_id = buf[7];
-		if (realms->zbr_dom_id < ZBC_NR_ZONE_TYPES)
-			realms->zbr_type = domains[realms->zbr_dom_id].zbm_type;
-		realms->zbr_nr_domains = nr_domains;
-		ptr = buf + ZBC_RPT_REALMS_DESC_OFFSET;
-		/* FIXME don't use nr_domains, use desc_len to limit iteration */
-		for (j = 0; j < nr_domains; j++) {
-			ri = &realms->zbr_ri[j];
-			ri->zbi_end_sector =
-					zbc_dev_lba2sect(dev, zbc_sg_get_int64(ptr + 8));
-			if (ri->zbi_end_sector) {
-				realms->zbr_actv_flags |= (1 << j);
-				d = &domains[j];
-				ri->zbi_dom_id = j;
-				ri->zbi_type = d->zbm_type;
-				ri->zbi_start_sector =
-					zbc_dev_lba2sect(dev, zbc_sg_get_int64(ptr));
-				if (d->zbm_nr_zones)
-					zone_size = zbc_zone_domain_zone_size(d);
-				else
-					zone_size = 0;
-				if (zone_size) {
-					ri->zbi_length = (ri->zbi_end_sector + 1 - ri->zbi_start_sector) /
-							 zone_size;
-				}
-			}
-			ptr += ZBC_RPT_REALMS_SE_DESC_SIZE;
+	/* Pagination loop: fetch realm descriptors across multiple pages */
+	do {
+		/* Allocate and initialize REPORT REALMS command */
+		ret = zbc_sg_cmd_init(dev, &cmd, ZBC_SG_REPORT_REALMS,
+				      NULL, bufsz);
+		if (ret != 0) {
+			free(domains);
+			return ret;
 		}
 
-		buf += desc_len;
-	}
+		/* Fill command CDB:
+		 * +=========================================================================+
+		 * |  Bit| 7    | 6    | 5    | 4    | 3    | 2    | 1    | 0    |
+		 * |Byte |      |      |      |      |      |      |      |      |
+		 * |=====+===================================================================|
+		 * | 0   |                     Operation Code (95h)                          |
+		 * |-----+--------------------------------------------------------------------|
+		 * | 1   |    Reserved          |         Service Action (06h)               |
+		 * |-----+--------------------------------------------------------------------|
+		 * | 2   | (MSB)                                                             |
+		 * |- - -+---                     Realm Start LBA                         ---|
+		 * | 9   |                                                             (LSB) |
+		 * |-----+--------------------------------------------------------------------|
+		 * | 10  | (MSB)                                                             |
+		 * |- - -+---                    Allocation Length                         ---|
+		 * | 13  |                                                             (LSB) |
+		 * |-----+--------------------------------------------------------------------|
+		 * | 14  |   Reserved  |             Reporting Options                       |
+		 * |-----+--------------------------------------------------------------------|
+		 * | 15  |                           Control                                 |
+		 * +=========================================================================+
+		 */
+		cmd.cdb[0] = ZBC_SG_REPORT_REALMS_CDB_OPCODE;
+		cmd.cdb[1] = ZBC_SG_REPORT_REALMS_CDB_SA;
+		zbc_sg_set_int64(&cmd.cdb[2], lba);
+		zbc_sg_set_int32(&cmd.cdb[10], (unsigned int)bufsz);
+		cmd.cdb[14] = ro & 0x3f;
 
-out:
+		/* Send the SG_IO command */
+		ret = zbc_sg_cmd_exec(dev, &cmd);
+		if (ret != 0) {
+			zbc_sg_cmd_destroy(&cmd);
+			break;
+		}
+
+		if (cmd.bufsz < ZBC_RPT_REALMS_HEADER_SIZE) {
+			zbc_error("%s: Not enough REPORT REALMS data received"
+				  " (need at least %d B, got %zu B)\n",
+				  dev->zbd_filename,
+				  ZBC_RPT_REALMS_HEADER_SIZE,
+				  cmd.bufsz);
+			ret = -EIO;
+			zbc_sg_cmd_destroy(&cmd);
+			break;
+		}
+
+		/* Parse header fields */
+		buf = cmd.buf;
+		nr = zbc_sg_get_int32(&buf[4]);
+
+		if (!realms || !nr) {
+			zbc_sg_cmd_destroy(&cmd);
+			break;
+		}
+
+		/* Limit to caller's buffer capacity */
+		if (nr > *nr_realms)
+			nr = *nr_realms;
+
+		if (!(dev->zbd_info.zbd_flags & ZBC_STANDARD_RPT_REALMS)) {
+			zbc_error("%s: REPORT REALMS is not supported"
+				  " by device",
+				  dev->zbd_filename);
+			ret = -ENXIO;
+			zbc_sg_cmd_destroy(&cmd);
+			break;
+		}
+
+		desc_len = zbc_sg_get_int32(&buf[8]);
+		next = zbc_sg_get_int64(&buf[12]);
+
+		/* Descriptors available in this page */
+		page_nr = (cmd.bufsz - ZBC_RPT_REALMS_HEADER_SIZE)
+			  / desc_len;
+		if (nr > page_nr)
+			nr = page_nr;
+
+		/* Get zone realm descriptors from this page */
+		buf += ZBC_RPT_REALMS_HEADER_SIZE;
+		for (i = 0; i < nr; i++, realms++) {
+			realms->zbr_number = zbc_sg_get_int32(buf);
+			realms->zbr_restr = zbc_sg_get_int16(&buf[4]);
+			realms->zbr_dom_id = buf[7];
+			if (realms->zbr_dom_id < ZBC_NR_ZONE_TYPES)
+				realms->zbr_type =
+					domains[realms->zbr_dom_id].zbm_type;
+			realms->zbr_nr_domains = nr_domains;
+			ptr = buf + ZBC_RPT_REALMS_DESC_OFFSET;
+			/* FIXME use desc_len to limit iteration */
+			for (j = 0; j < nr_domains; j++) {
+				ri = &realms->zbr_ri[j];
+				ri->zbi_end_sector =
+					zbc_dev_lba2sect(dev,
+						zbc_sg_get_int64(ptr + 8));
+				if (ri->zbi_end_sector) {
+					realms->zbr_actv_flags |= (1 << j);
+					d = &domains[j];
+					ri->zbi_dom_id = j;
+					ri->zbi_type = d->zbm_type;
+					ri->zbi_start_sector =
+						zbc_dev_lba2sect(dev,
+							zbc_sg_get_int64(ptr));
+					if (d->zbm_nr_zones)
+						zone_size =
+						    zbc_zone_domain_zone_size(d);
+					else
+						zone_size = 0;
+					if (zone_size) {
+						ri->zbi_length =
+						    (ri->zbi_end_sector + 1 -
+						     ri->zbi_start_sector) /
+						    zone_size;
+					}
+				}
+				ptr += ZBC_RPT_REALMS_SE_DESC_SIZE;
+			}
+
+			buf += desc_len;
+		}
+
+		total_nr += nr;
+		*nr_realms -= nr;
+
+		zbc_sg_cmd_destroy(&cmd);
+
+		/* Advance to next page */
+		lba = next;
+
+	} while (next != 0 && *nr_realms > 0);
+
 	if (domains)
 		free(domains);
 
-	/* Return the number of realm descriptors */
-	*nr_realms = nr;
-
-	/* Cleanup */
-	zbc_sg_cmd_destroy(&cmd);
+	/* Return the total number of realm descriptors filled */
+	*nr_realms = total_nr;
 
 	return ret;
 }
