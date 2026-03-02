@@ -886,8 +886,7 @@ static int zbc_ata_report_realms(struct zbc_device *dev, uint64_t sector,
 				if (ret) {
 					zbc_ata_get_sense_data(dev, &cmd,
 							       ret);
-					zbc_sg_cmd_destroy(&cmd);
-					break;
+					goto done;
 				}
 
 				if (cmd.bufsz < ZBC_RPT_REALMS_HEADER_SIZE) {
@@ -899,16 +898,13 @@ static int zbc_ata_report_realms(struct zbc_device *dev, uint64_t sector,
 						  ZBC_RPT_REALMS_HEADER_SIZE,
 						  cmd.bufsz);
 					ret = -EIO;
-					zbc_sg_cmd_destroy(&cmd);
-					break;
+					goto done;
 				}
 
 				buf = cmd.buf;
 				nr = zbc_ata_get_dword(&buf[0]);
-				if (!nr) {
-					zbc_sg_cmd_destroy(&cmd);
-					break;
-				}
+				if (!nr)
+					goto done;
 				if (nr > *nr_realms)
 					nr = *nr_realms;
 
@@ -973,6 +969,7 @@ static int zbc_ata_report_realms(struct zbc_device *dev, uint64_t sector,
 
 		} while (next != 0 && *nr_realms > 0);
 
+done:
 		zbc_sg_cmd_destroy(&cmd);
 
 		if (domains)
