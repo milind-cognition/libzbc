@@ -1,0 +1,69 @@
+name: Add Doxygen Comments via Devin
+
+on:
+  workflow_dispatch:
+    inputs:
+      scope:
+        description: >
+          Which files/directories to add Doxygen comments to
+          (e.g. "lib/zbc.c", "include/", or leave blank for all public headers and library sources)
+        required: false
+        default: ""
+
+jobs:
+  trigger-devin:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Kick off Devin session
+        env:
+          DEVIN_API_KEY: ${{ secrets.DEVIN_API_KEY }}
+        run: |
+          SCOPE="${{ github.event.inputs.scope }}"
+
+          if [ -z "$SCOPE" ]; then
+            SCOPE_INSTRUCTION="all public header files under include/libzbc/ and all library source files under lib/"
+          else
+            SCOPE_INSTRUCTION="the following files/directories: $SCOPE"
+          fi
+
+          PROMPT=$(cat <<'ENDOFPROMPT'
+          You are working on the milind-cognition/libzbc repository — a C library for managing Zoned Block Devices (ZBD).
+
+          Your task: Add Doxygen-compatible documentation comments to SCOPE_PLACEHOLDER so that running Doxygen picks them up and produces complete API documentation.
+
+          Guidelines:
+          1. Use /** ... */ comment blocks (C-style Doxygen comments).
+          2. For every public function, add @brief, @param (for each parameter), and @return tags.
+          3. For every public struct/enum/typedef, add @brief and document each member with /**< ... */ inline comments or @param-style tags.
+          4. For every #define macro, add a @brief and document parameters with @param if it is function-like.
+          5. Preserve existing comments — only add or augment, never remove.
+          6. Match the existing code style (tab indentation, line length conventions).
+          7. The project already has a Doxygen config at documentation/libzbc.doxygen — do NOT modify it.
+          8. Create a PR with your changes when done.
+
+          The main public header is include/libzbc/zbc.h. The internal library sources are in lib/.
+          Focus on making sure every function, struct, enum, typedef, and macro has proper Doxygen comments.
+          ENDOFPROMPT
+          )
+
+          PROMPT="${PROMPT//SCOPE_PLACEHOLDER/$SCOPE_INSTRUCTION}"
+
+          RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "https://api.devin.ai/v3/organizations/sessions" \
+            -H "Authorization: Bearer $DEVIN_API_KEY" \
+            -H "Content-Type: application/json" \
+            -d "$(jq -n --arg prompt "$PROMPT" '{prompt: $prompt}')")
+
+          HTTP_CODE=$(echo "$RESPONSE" | tail -1)
+          BODY=$(echo "$RESPONSE" | sed '$d')
+
+          if [ "$HTTP_CODE" -ge 200 ] && [ "$HTTP_CODE" -lt 300 ]; then
+            SESSION_ID=$(echo "$BODY" | jq -r '.session_id // .devin_id // "unknown"')
+            SESSION_URL=$(echo "$BODY" | jq -r '.url // "unknown"')
+            echo "Devin session created successfully!"
+            echo "Session ID: $SESSION_ID"
+            echo "Session URL: $SESSION_URL"
+          else
+            echo "Failed to create Devin session (HTTP $HTTP_CODE)"
+            echo "$BODY"
+            exit 1
+          fi
