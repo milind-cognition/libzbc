@@ -1,0 +1,343 @@
+name: Auto-resolve SonarQube Vulnerabilities via Devin
+
+on:
+  schedule:
+    # Run daily at 08:00 UTC
+    - cron: "0 8 * * *"
+  workflow_dispatch:
+    inputs:
+      max_sessions:
+        description: "Maximum number of Devin sessions to create"
+        required: false
+        default: "5"
+      severities:
+        description: "Comma-separated severity filter (BLOCKER,CRITICAL,MAJOR,MINOR,INFO)"
+        required: false
+        default: "BLOCKER,CRITICAL,MAJOR"
+      dry_run:
+        description: "If true, only log issues without creating Devin sessions"
+        required: false
+        default: "false"
+
+permissions:
+  issues: write
+  contents: read
+
+env:
+  SONARQUBE_PROJECT_KEY: "milind-cognition_libzbc"
+  SONARQUBE_HOST_URL: "https://sonarcloud.io"
+  SONARQUBE_ORGANIZATION: "milind-cognition"
+  DEVIN_API_BASE: "https://api.devin.ai/v1"
+  GITHUB_REPO: "milind-cognition/libzbc"
+  ISSUE_LABEL: "sonarqube-devin-autoresolve"
+
+jobs:
+  fetch-and-resolve:
+    name: Fetch SonarQube issues and kick off Devin sessions
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up parameters
+        id: params
+        run: |
+          # Use workflow_dispatch inputs or defaults for scheduled runs
+          echo "max_sessions=${{ github.event.inputs.max_sessions || '5' }}" >> "$GITHUB_OUTPUT"
+          echo "severities=${{ github.event.inputs.severities || 'BLOCKER,CRITICAL,MAJOR' }}" >> "$GITHUB_OUTPUT"
+          echo "dry_run=${{ github.event.inputs.dry_run || 'false' }}" >> "$GITHUB_OUTPUT"
+
+      - name: Fetch open issues from SonarQube
+        id: fetch_issues
+        env:
+          SONARQUBE_TOKEN: ${{ secrets.SONARQUBE_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          SEVERITIES="${{ steps.params.outputs.severities }}"
+
+          echo "Fetching open SonarQube issues for project: $SONARQUBE_PROJECT_KEY"
+          echo "Severity filter: $SEVERITIES"
+
+          # Convert comma-separated severities to repeated query params
+          SEVERITY_PARAMS=""
+          IFS=',' read -ra SEV_ARRAY <<< "$SEVERITIES"
+          for sev in "${SEV_ARRAY[@]}"; do
+            SEVERITY_PARAMS="${SEVERITY_PARAMS}&severities=${sev}"
+          done
+
+          # Fetch issues from SonarQube Cloud API (paginated)
+          ALL_ISSUES="[]"
+          PAGE=1
+          PAGE_SIZE=100
+          TOTAL=0
+
+          while true; do
+            RESPONSE=$(curl -s -f \
+              -u "${SONARQUBE_TOKEN}:" \
+              "${SONARQUBE_HOST_URL}/api/issues/search?projects=${SONARQUBE_PROJECT_KEY}&statuses=OPEN,CONFIRMED,REOPENED${SEVERITY_PARAMS}&ps=${PAGE_SIZE}&p=${PAGE}&organization=${SONARQUBE_ORGANIZATION}")
+
+            ISSUES=$(echo "$RESPONSE" | jq '.issues // []')
+            COUNT=$(echo "$ISSUES" | jq 'length')
+            TOTAL=$(echo "$RESPONSE" | jq '.paging.total // 0')
+
+            echo "Page $PAGE: fetched $COUNT issues (total: $TOTAL)"
+
+            ALL_ISSUES=$(echo "$ALL_ISSUES" "$ISSUES" | jq -s '.[0] + .[1]')
+
+            FETCHED=$(echo "$ALL_ISSUES" | jq 'length')
+            if [ "$FETCHED" -ge "$TOTAL" ] || [ "$COUNT" -eq 0 ]; then
+              break
+            fi
+
+            PAGE=$((PAGE + 1))
+
+            # Safety: don't fetch more than 10 pages
+            if [ "$PAGE" -gt 10 ]; then
+              echo "::warning::Stopping pagination at page 10 ($FETCHED of $TOTAL issues fetched)"
+              break
+            fi
+          done
+
+          ISSUE_COUNT=$(echo "$ALL_ISSUES" | jq 'length')
+          echo "Total issues fetched: $ISSUE_COUNT"
+
+          # Save full issue list to file for next step
+          echo "$ALL_ISSUES" > /tmp/sonar_issues.json
+
+          echo "issue_count=$ISSUE_COUNT" >> "$GITHUB_OUTPUT"
+
+      - name: Group issues by file and deduplicate
+        id: group_issues
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          MAX_SESSIONS=${{ steps.params.outputs.max_sessions }}
+
+          # Ensure the tracking label exists
+          gh label create "$ISSUE_LABEL" \
+            --description "Tracks SonarQube issues dispatched to Devin for auto-resolution" \
+            --color "d4c5f9" \
+            --repo "$GITHUB_REPO" 2>/dev/null || true
+
+          # Fetch all open GitHub issues with our tracking label to find already-dispatched keys
+          DISPATCHED_KEYS=$(gh issue list \
+            --repo "$GITHUB_REPO" \
+            --label "$ISSUE_LABEL" \
+            --state all \
+            --json body \
+            --limit 1000 \
+            -q '.[].body' | grep -oP 'SONAR_KEY:\K[^\s]+' || echo "")
+
+          echo "Already dispatched SonarQube issue keys:"
+          echo "$DISPATCHED_KEYS" | head -20
+
+          # Filter out already-dispatched issues and group by file
+          jq -r --arg dispatched "$DISPATCHED_KEYS" '
+            # Convert dispatched keys into an array
+            ($dispatched | split("\n") | map(select(length > 0))) as $dispatched_arr |
+
+            # Filter out already-dispatched issues
+            map(select(.key as $k | $dispatched_arr | index($k) | not)) |
+
+            # Group by component (file path)
+            group_by(.component) |
+
+            # Build session descriptors
+            map({
+              file: .[0].component,
+              file_path: (.[0].component | split(":") | .[1] // .[0]),
+              issues: map({
+                key: .key,
+                rule: .rule,
+                severity: .severity,
+                message: .message,
+                line: (.textRange.startLine // "unknown")
+              }),
+              issue_count: length,
+              max_severity: (
+                [.[].severity] |
+                if index("BLOCKER") then "BLOCKER"
+                elif index("CRITICAL") then "CRITICAL"
+                elif index("MAJOR") then "MAJOR"
+                elif index("MINOR") then "MINOR"
+                else "INFO"
+                end
+              )
+            }) |
+
+            # Sort by severity (most critical first) then by issue count
+            sort_by(
+              if .max_severity == "BLOCKER" then 0
+              elif .max_severity == "CRITICAL" then 1
+              elif .max_severity == "MAJOR" then 2
+              elif .max_severity == "MINOR" then 3
+              else 4
+              end,
+              - .issue_count
+            )
+          ' /tmp/sonar_issues.json > /tmp/grouped_issues.json
+
+          TOTAL_GROUPS=$(jq 'length' /tmp/grouped_issues.json)
+          echo "File groups with new issues: $TOTAL_GROUPS"
+
+          # Take only up to max_sessions groups
+          jq --argjson max "$MAX_SESSIONS" '.[:$max]' /tmp/grouped_issues.json > /tmp/sessions_to_create.json
+
+          SESSION_COUNT=$(jq 'length' /tmp/sessions_to_create.json)
+          echo "Sessions to create: $SESSION_COUNT"
+          echo "session_count=$SESSION_COUNT" >> "$GITHUB_OUTPUT"
+
+          # Pretty print summary
+          echo "### Session Plan ###"
+          jq -r '.[] | "  File: \(.file_path) | Issues: \(.issue_count) | Max Severity: \(.max_severity)"' /tmp/sessions_to_create.json
+
+      - name: Create Devin sessions for each file group
+        if: steps.group_issues.outputs.session_count != '0' && steps.params.outputs.dry_run != 'true'
+        env:
+          DEVIN_API_KEY: ${{ secrets.DEVIN_API_KEY }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          SESSION_COUNT=$(jq 'length' /tmp/sessions_to_create.json)
+          echo "Creating $SESSION_COUNT Devin session(s)..."
+
+          CREATED=0
+          FAILED=0
+
+          for i in $(seq 0 $((SESSION_COUNT - 1))); do
+            GROUP=$(jq ".[$i]" /tmp/sessions_to_create.json)
+            FILE_PATH=$(echo "$GROUP" | jq -r '.file_path')
+            ISSUE_COUNT=$(echo "$GROUP" | jq -r '.issue_count')
+            MAX_SEVERITY=$(echo "$GROUP" | jq -r '.max_severity')
+            ISSUES=$(echo "$GROUP" | jq -r '.issues')
+            SONAR_KEYS=$(echo "$GROUP" | jq -r '[.issues[].key] | join(",")')
+
+            echo ""
+            echo "=== Session $((i + 1))/$SESSION_COUNT ==="
+            echo "File: $FILE_PATH"
+            echo "Issues: $ISSUE_COUNT (max severity: $MAX_SEVERITY)"
+
+            # Build issue details for the prompt
+            ISSUE_DETAILS=$(echo "$ISSUES" | jq -r '
+              .[] | "  - Line \(.line): [\(.severity)] \(.message) (rule: \(.rule), key: \(.key))"
+            ')
+
+            # Build the Devin prompt
+            PROMPT=$(cat <<EOF
+          You are resolving SonarQube vulnerabilities in the repository milind-cognition/libzbc.
+
+          **File:** \`$FILE_PATH\`
+          **Issues to resolve ($ISSUE_COUNT):**
+          $ISSUE_DETAILS
+
+          **Instructions:**
+          1. Clone and examine the repository: milind-cognition/libzbc
+          2. Read and understand the file \`$FILE_PATH\` and its surrounding context
+          3. Fix each of the listed SonarQube issues while preserving the existing functionality
+          4. For each fix, ensure you understand the SonarQube rule being violated
+          5. Make minimal, focused changes — do not refactor beyond what is needed
+          6. Create a PR with your fixes targeting the \`master\` branch
+          7. In the PR description, list each SonarQube issue key resolved
+
+          **Important:**
+          - This is a C library for managing Zoned Block Devices (ZBD). Be careful with memory management and system-level code.
+          - Do not break the existing API or change public function signatures
+          - Follow the existing code style and conventions in the project
+          - If a fix is non-trivial or risky, explain your reasoning in the PR
+          EOF
+          )
+
+            # Create Devin session via API
+            RESPONSE=$(curl -s -w "\n%{http_code}" \
+              -X POST "${DEVIN_API_BASE}/sessions" \
+              -H "Authorization: Bearer ${DEVIN_API_KEY}" \
+              -H "Content-Type: application/json" \
+              -d "$(jq -n \
+                --arg prompt "$PROMPT" \
+                --arg title "Fix SonarQube issues in $FILE_PATH" \
+                '{
+                  prompt: $prompt,
+                  title: $title,
+                  idempotent: true
+                }'
+              )")
+
+            HTTP_CODE=$(echo "$RESPONSE" | tail -1)
+            BODY=$(echo "$RESPONSE" | sed '$d')
+
+            if [ "$HTTP_CODE" -ge 200 ] && [ "$HTTP_CODE" -lt 300 ]; then
+              SESSION_ID=$(echo "$BODY" | jq -r '.session_id // "unknown"')
+              SESSION_URL=$(echo "$BODY" | jq -r '.url // "unknown"')
+              echo "Devin session created: $SESSION_URL"
+
+              # Create a GitHub issue to track this dispatch
+              ISSUE_BODY=$(cat <<EOF
+          ## SonarQube Auto-Resolution Dispatch
+
+          **Devin Session:** $SESSION_URL
+          **File:** \`$FILE_PATH\`
+          **Issue Count:** $ISSUE_COUNT
+          **Max Severity:** $MAX_SEVERITY
+
+          ### SonarQube Issues
+          $(echo "$ISSUES" | jq -r '.[] | "- **\(.key)**: [\(.severity)] \(.message) (line \(.line), rule: \(.rule))"')
+
+          ---
+          *Dispatched by [sonarqube-devin-autoresolve](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}) workflow*
+
+          <!-- Tracking keys for deduplication -->
+          $(echo "$ISSUES" | jq -r '.[] | "SONAR_KEY:\(.key)"')
+          EOF
+          )
+
+              gh issue create \
+                --repo "$GITHUB_REPO" \
+                --title "[SonarQube/Devin] Fix $ISSUE_COUNT issue(s) in $FILE_PATH" \
+                --body "$ISSUE_BODY" \
+                --label "$ISSUE_LABEL" || echo "::warning::Failed to create tracking issue for $FILE_PATH"
+
+              CREATED=$((CREATED + 1))
+            else
+              echo "::error::Failed to create Devin session for $FILE_PATH (HTTP $HTTP_CODE)"
+              echo "Response: $BODY"
+              FAILED=$((FAILED + 1))
+            fi
+
+            # Rate limit: wait between session creations
+            if [ $i -lt $((SESSION_COUNT - 1)) ]; then
+              sleep 5
+            fi
+          done
+
+          echo ""
+          echo "=== Summary ==="
+          echo "Sessions created: $CREATED"
+          echo "Sessions failed: $FAILED"
+
+          if [ "$FAILED" -gt 0 ]; then
+            echo "::warning::$FAILED session(s) failed to create"
+          fi
+
+      - name: Dry run summary
+        if: steps.params.outputs.dry_run == 'true'
+        run: |
+          echo "### Dry Run - No Devin sessions created ###"
+          echo ""
+          echo "Issues that would be dispatched:"
+          jq -r '.[] | "File: \(.file_path) (\(.issue_count) issues, max severity: \(.max_severity))\n\(.issues[] | "  - Line \(.line): [\(.severity)] \(.message)")\n"' /tmp/sessions_to_create.json
+
+      - name: Post summary
+        if: always()
+        run: |
+          echo "## SonarQube Devin Auto-Resolve Summary" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Project:** $SONARQUBE_PROJECT_KEY" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Total SonarQube issues found:** ${{ steps.fetch_issues.outputs.issue_count || 'N/A' }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Devin sessions planned:** ${{ steps.group_issues.outputs.session_count || 'N/A' }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Dry run:** ${{ steps.params.outputs.dry_run }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- **Severity filter:** ${{ steps.params.outputs.severities }}" >> "$GITHUB_STEP_SUMMARY"
