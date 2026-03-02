@@ -75,7 +75,7 @@ jobs:
 
           PROMPT="${PROMPT//SCOPE_PLACEHOLDER/$SCOPE_INSTRUCTION}"
 
-          RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "https://api.devin.ai/v3/organizations/sessions" \
+          RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "https://api.devin.ai/v1/sessions" \
             -H "Authorization: Bearer $DEVIN_API_KEY" \
             -H "Content-Type: application/json" \
             -d "$(jq -n --arg prompt "$PROMPT" '{prompt: $prompt}')")
