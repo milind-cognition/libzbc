@@ -761,7 +761,7 @@ static int zbc_ata_report_realms(struct zbc_device *dev, uint64_t sector,
 	uint8_t const *buf, *ptr;
 	uint64_t zone_size, next, lba = zbc_dev_sect2lba(dev, sector);
 	size_t bufsz = ZBC_RPT_REALMS_HEADER_SIZE;
-	unsigned int i, nr = 0, desc_len;
+	unsigned int i, nr = 0, nr_filled = 0, desc_len;
 	struct zbc_sg_cmd cmd;
 	int ret, j, nr_domains;
 
@@ -792,189 +792,213 @@ static int zbc_ata_report_realms(struct zbc_device *dev, uint64_t sector,
 
 	bufsz = zbc_sg_align_bufsz(dev, bufsz);
 
-	/* Allocate and initialize REPORT REALMS command */
-	ret = zbc_sg_cmd_init(dev, &cmd, ZBC_SG_ATA16, NULL, bufsz);
-	if (ret != 0) {
-		free(domains);
-		return ret;
-	}
+	/* Pagination loop: fetch realm descriptors across multiple pages */
+	do {
+		/* Allocate and initialize REPORT REALMS command */
+		ret = zbc_sg_cmd_init(dev, &cmd, ZBC_SG_ATA16, NULL, bufsz);
+		if (ret != 0) {
+			free(domains);
+			return ret;
+		}
 
-	/* Fill command CDB:
-	 * +=============================================================================+
-	 * |  Bit|   7    |   6    |   5    |   4    |   3    |   2    |   1    |   0    |
-	 * |Byte |        |        |        |        |        |        |        |        |
-	 * |=====+==========================+============================================|
-	 * | 0   |                           Operation Code (85h)                        |
-	 * |-----+-----------------------------------------------------------------------|
-	 * | 1   |      Multiple count      |              Protocol             |  ext   |
-	 * |-----+-----------------------------------------------------------------------|
-	 * | 2   |    off_line     |ck_cond | t_type | t_dir  |byt_blk |    t_length     |
-	 * |-----+-----------------------------------------------------------------------|
-	 * | 3   |                  features (15:8) Reporting options                    |
-	 * |-----+-----------------------------------------------------------------------|
-	 * | 4   |                   features (7:0), action (06h)                        |
-	 * |-----+-----------------------------------------------------------------------|
-	 * | 5-6 |                                count                                  |
-	 * |-----+-----------------------------------------------------------------------|
-	 * | 7-12|                             LBA (ZONE ID)                             |
-	 * |-----+-----------------------------------------------------------------------|
-	 * | 13  |                   Device, bit 6 shall be set to 1                     |
-	 * |-----+-----------------------------------------------------------------------|
-	 * | 14  |                           Command (4Ah)                               |
-	 * |-----+-----------------------------------------------------------------------|
-	 * | 15  |                             Control                                   |
-	 * +=============================================================================+
-	 */
-	cmd.io_hdr.dxfer_direction = SG_DXFER_FROM_DEV;
-	cmd.cdb[0] = ZBC_SG_ATA16_CDB_OPCODE;
-	/* DMA protocol, ext=1 */
-	cmd.cdb[1] = (0x06 << 1) | 0x01;
-	/* off_line=0, ck_cond=0, t_type=0, t_dir=1, byt_blk=1, t_length=10 */
-	cmd.cdb[2] = 0x0e;
-	/* Fill RO, ZONE ID, AF, Count and Device */
-	cmd.cdb[3] = ro & 0x3f;
-	cmd.cdb[4] = ZBC_ATA_REPORT_REALMS_AF;
-	cmd.cdb[5] = ((bufsz / 512) >> 8) & 0xff;
-	cmd.cdb[6] = (bufsz / 512) & 0xff;
-	zbc_ata_put_lba(cmd.cdb, lba);
-	cmd.cdb[13] = 1 << 6;
-	cmd.cdb[14] = ZBC_ATA_ZAC_MANAGEMENT_IN;
+		/* Fill command CDB:
+		 * +=============================================================================+
+		 * |  Bit|   7    |   6    |   5    |   4    |   3    |   2    |   1    |   0    |
+		 * |Byte |        |        |        |        |        |        |        |        |
+		 * |=====+==========================+============================================|
+		 * | 0   |                           Operation Code (85h)                        |
+		 * |-----+-----------------------------------------------------------------------|
+		 * | 1   |      Multiple count      |              Protocol             |  ext   |
+		 * |-----+-----------------------------------------------------------------------|
+		 * | 2   |    off_line     |ck_cond | t_type | t_dir  |byt_blk |    t_length     |
+		 * |-----+-----------------------------------------------------------------------|
+		 * | 3   |                  features (15:8) Reporting options                    |
+		 * |-----+-----------------------------------------------------------------------|
+		 * | 4   |                   features (7:0), action (06h)                        |
+		 * |-----+-----------------------------------------------------------------------|
+		 * | 5-6 |                                count                                  |
+		 * |-----+-----------------------------------------------------------------------|
+		 * | 7-12|                             LBA (ZONE ID)                             |
+		 * |-----+-----------------------------------------------------------------------|
+		 * | 13  |                   Device, bit 6 shall be set to 1                     |
+		 * |-----+-----------------------------------------------------------------------|
+		 * | 14  |                           Command (4Ah)                               |
+		 * |-----+-----------------------------------------------------------------------|
+		 * | 15  |                             Control                                   |
+		 * +=============================================================================+
+		 */
+		cmd.io_hdr.dxfer_direction = SG_DXFER_FROM_DEV;
+		cmd.cdb[0] = ZBC_SG_ATA16_CDB_OPCODE;
+		/* DMA protocol, ext=1 */
+		cmd.cdb[1] = (0x06 << 1) | 0x01;
+		/* off_line=0, ck_cond=0, t_type=0, t_dir=1, byt_blk=1, t_length=10 */
+		cmd.cdb[2] = 0x0e;
+		/* Fill RO, ZONE ID, AF, Count and Device */
+		cmd.cdb[3] = ro & 0x3f;
+		cmd.cdb[4] = ZBC_ATA_REPORT_REALMS_AF;
+		cmd.cdb[5] = ((bufsz / 512) >> 8) & 0xff;
+		cmd.cdb[6] = (bufsz / 512) & 0xff;
+		zbc_ata_put_lba(cmd.cdb, lba);
+		cmd.cdb[13] = 1 << 6;
+		cmd.cdb[14] = ZBC_ATA_ZAC_MANAGEMENT_IN;
 
-	/* Send the SG_IO command */
-	ret = zbc_sg_cmd_exec(dev, &cmd);
-	if (ret) {
-		zbc_ata_get_sense_data(dev, &cmd, ret);
-		goto out;
-	}
-
-	if (cmd.bufsz < ZBC_RPT_REALMS_HEADER_SIZE) {
-		zbc_error("%s: Not enough REPORT REALMS data received"
-			  " (need at least %d B, got %zu B)\n",
-			  dev->zbd_filename,
-			  ZBC_RPT_REALMS_HEADER_SIZE,
-			  cmd.bufsz);
-		ret = -EIO;
-		goto out;
-	}
-
-	/* Get the number of realm descriptors from the header */
-	buf = cmd.buf;
-	nr = zbc_ata_get_dword(&buf[0]);
-
-	if (!realms || !nr)
-		goto out;
-
-	/* Find the number of zone realm descriptors to fill */
-	if (nr > *nr_realms)
-		nr = *nr_realms;
-
-	if (dev->zbd_info.zbd_flags & ZBC_STANDARD_RPT_REALMS) {
-		desc_len = zbc_ata_get_dword(&buf[4]);
-		if (!desc_len)
-			goto oldrealms; /* The field is reserved pre ZDr4, so it has to be 0 */
-		next = zbc_ata_get_qword(&buf[8]);
-		if (next) {
-			zbc_error("%s: NEXT REALM LOCATOR is not yet supported",
-				  dev->zbd_filename);
-			ret = -ENXIO; /* FIXME handle */
+		/* Send the SG_IO command */
+		ret = zbc_sg_cmd_exec(dev, &cmd);
+		if (ret) {
+			zbc_ata_get_sense_data(dev, &cmd, ret);
+			zbc_sg_cmd_destroy(&cmd);
 			goto out;
 		}
 
-		bufsz = (cmd.bufsz - ZBC_RPT_REALMS_HEADER_SIZE) / desc_len;
-		if (nr > bufsz)
-			nr = bufsz;
+		if (cmd.bufsz < ZBC_RPT_REALMS_HEADER_SIZE) {
+			zbc_error("%s: Not enough REPORT REALMS data received"
+				  " (need at least %d B, got %zu B)\n",
+				  dev->zbd_filename,
+				  ZBC_RPT_REALMS_HEADER_SIZE,
+				  cmd.bufsz);
+			ret = -EIO;
+			zbc_sg_cmd_destroy(&cmd);
+			goto out;
+		}
 
-		/* Get zone realm descriptors */
+		/* Get the number of realm descriptors from the header */
+		buf = cmd.buf;
+		nr = zbc_ata_get_dword(&buf[0]);
+
+		if (!realms || !nr) {
+			zbc_sg_cmd_destroy(&cmd);
+			goto out;
+		}
+
+		/* Find the number of zone realm descriptors to fill */
+		if (nr > *nr_realms)
+			nr = *nr_realms;
+
+		if (dev->zbd_info.zbd_flags & ZBC_STANDARD_RPT_REALMS) {
+			desc_len = zbc_ata_get_dword(&buf[4]);
+			if (!desc_len)
+				goto oldrealms; /* The field is reserved pre ZDr4, so it has to be 0 */
+			next = zbc_ata_get_qword(&buf[8]);
+
+			bufsz = (cmd.bufsz - ZBC_RPT_REALMS_HEADER_SIZE) /
+				desc_len;
+			if (nr > bufsz)
+				nr = bufsz;
+
+			/* Get zone realm descriptors */
+			buf += ZBC_RPT_REALMS_HEADER_SIZE;
+			for (i = 0; i < nr && nr_filled < *nr_realms;
+			     i++, realms++, nr_filled++) {
+				realms->zbr_number = zbc_ata_get_dword(buf);
+				realms->zbr_restr = zbc_ata_get_word(&buf[4]);
+				realms->zbr_dom_id = buf[7];
+				if (realms->zbr_dom_id < ZBC_NR_ZONE_TYPES)
+					realms->zbr_type =
+						domains[realms->zbr_dom_id].zbm_type;
+				realms->zbr_nr_domains = nr_domains;
+				ptr = buf + ZBC_RPT_REALMS_DESC_OFFSET;
+				/* FIXME don't use nr_domains, use desc_len to limit iteration */
+				for (j = 0; j < nr_domains; j++) {
+					ri = &realms->zbr_ri[j];
+					ri->zbi_end_sector =
+						zbc_dev_lba2sect(dev,
+							zbc_ata_get_qword(ptr + 8));
+					if (ri->zbi_end_sector) {
+						realms->zbr_actv_flags |= (1 << j);
+						d = &domains[j];
+						ri->zbi_dom_id = j;
+						ri->zbi_type = d->zbm_type;
+						ri->zbi_start_sector =
+							zbc_dev_lba2sect(dev,
+								zbc_ata_get_qword(ptr));
+						if (d->zbm_nr_zones)
+							zone_size =
+								zbc_zone_domain_zone_size(d);
+						else
+							zone_size = 0;
+						if (zone_size) {
+							ri->zbi_length =
+								(ri->zbi_end_sector + 1 -
+								 ri->zbi_start_sector) /
+								zone_size;
+						}
+					}
+					ptr += ZBC_RPT_REALMS_SE_DESC_SIZE;
+				}
+
+				buf += desc_len;
+			}
+
+			zbc_sg_cmd_destroy(&cmd);
+
+			/* Set up for next page */
+			lba = next;
+
+			continue;
+
+	oldrealms:
+			desc_len = ZBC_RPT_REALMS_RECORD_SIZE;
+		} else {
+			desc_len = ZBC_RPT_REALMS_RECORD_SIZE;
+			bufsz = (cmd.bufsz - ZBC_RPT_REALMS_HEADER_SIZE) /
+				desc_len;
+			if (nr > bufsz)
+				nr = bufsz;
+		}
+
+		/* Get zone realm descriptors (legacy path) */
 		buf += ZBC_RPT_REALMS_HEADER_SIZE;
-		for (i = 0; i < nr; i++, realms++) {
-			realms->zbr_number = zbc_ata_get_dword(buf);
-			realms->zbr_restr = zbc_ata_get_word(&buf[4]);
-			realms->zbr_dom_id = buf[7];
+		for (i = 0; i < nr; i++, realms++, nr_filled++) {
+			realms->zbr_dom_id = buf[0];
 			if (realms->zbr_dom_id < ZBC_NR_ZONE_TYPES)
-				realms->zbr_type = domains[realms->zbr_dom_id].zbm_type;
+				realms->zbr_type =
+					domains[realms->zbr_dom_id].zbm_type;
+			realms->zbr_actv_flags = buf[1];
+			realms->zbr_number = zbc_ata_get_word(&buf[2]);
 			realms->zbr_nr_domains = nr_domains;
 			ptr = buf + ZBC_RPT_REALMS_DESC_OFFSET;
-			/* FIXME don't use nr_domains, use desc_len to limit iteration */
-			for (j = 0; j < nr_domains; j++) {
-				ri = &realms->zbr_ri[j];
-				ri->zbi_end_sector =
-						zbc_dev_lba2sect(dev, zbc_ata_get_qword(ptr + 8));
-				if (ri->zbi_end_sector) {
-					realms->zbr_actv_flags |= (1 << j);
+			for (j = 0; j < ZBC_NR_ZONE_TYPES; j++) {
+				if (realms->zbr_actv_flags & (1 << j)) {
 					d = &domains[j];
+					ri = &realms->zbr_ri[j];
 					ri->zbi_dom_id = j;
 					ri->zbi_type = d->zbm_type;
 					ri->zbi_start_sector =
-						zbc_dev_lba2sect(dev, zbc_ata_get_qword(ptr));
+						zbc_dev_lba2sect(dev,
+							zbc_ata_get_qword(ptr));
+					ri->zbi_end_sector =
+						zbc_dev_lba2sect(dev,
+							zbc_ata_get_qword(ptr + 8));
 					if (d->zbm_nr_zones)
-						zone_size = zbc_zone_domain_zone_size(d);
+						zone_size =
+							zbc_zone_domain_zone_size(d);
 					else
 						zone_size = 0;
 					if (zone_size) {
-						ri->zbi_length = (ri->zbi_end_sector + 1 - ri->zbi_start_sector) /
-								 zone_size;
+						ri->zbi_length =
+							(ri->zbi_end_sector + 1 -
+							 ri->zbi_start_sector) /
+							zone_size;
 					}
 				}
 				ptr += ZBC_RPT_REALMS_SE_DESC_SIZE;
 			}
 
-			buf += desc_len;
-		}
-		goto out;
-
-oldrealms:
-		desc_len = ZBC_RPT_REALMS_RECORD_SIZE;
-	} else {
-		desc_len = ZBC_RPT_REALMS_RECORD_SIZE;
-		bufsz = (cmd.bufsz - ZBC_RPT_REALMS_HEADER_SIZE) / desc_len;
-		if (nr > bufsz)
-			nr = bufsz;
-	}
-
-	/* Get zone realm descriptors */
-	buf += ZBC_RPT_REALMS_HEADER_SIZE;
-	for (i = 0; i < nr; i++, realms++) {
-		realms->zbr_dom_id = buf[0];
-		if (realms->zbr_dom_id < ZBC_NR_ZONE_TYPES)
-			realms->zbr_type = domains[realms->zbr_dom_id].zbm_type;
-		realms->zbr_actv_flags = buf[1];
-		realms->zbr_number = zbc_ata_get_word(&buf[2]);
-		realms->zbr_nr_domains = nr_domains;
-		ptr = buf + ZBC_RPT_REALMS_DESC_OFFSET;
-		for (j = 0; j < ZBC_NR_ZONE_TYPES; j++) {
-			if (realms->zbr_actv_flags & (1 << j)) {
-				d = &domains[j];
-				ri = &realms->zbr_ri[j];
-				ri->zbi_dom_id = j;
-				ri->zbi_type = d->zbm_type;
-				ri->zbi_start_sector =
-					zbc_dev_lba2sect(dev, zbc_ata_get_qword(ptr));
-				ri->zbi_end_sector =
-					zbc_dev_lba2sect(dev, zbc_ata_get_qword(ptr + 8));
-				if (d->zbm_nr_zones)
-					zone_size = zbc_zone_domain_zone_size(d);
-				else
-					zone_size = 0;
-				if (zone_size) {
-					ri->zbi_length = (ri->zbi_end_sector + 1 - ri->zbi_start_sector) /
-							 zone_size;
-				}
-			}
-			ptr += ZBC_RPT_REALMS_SE_DESC_SIZE;
+			buf += ZBC_RPT_REALMS_RECORD_SIZE;
 		}
 
-		buf += ZBC_RPT_REALMS_RECORD_SIZE;
-	}
+		/* Legacy path doesn't support pagination */
+		zbc_sg_cmd_destroy(&cmd);
+		break;
+
+	} while (next != 0 && nr_filled < *nr_realms);
 
 out:
 	if (domains)
 		free(domains);
 
 	/* Return the number of descriptors */
-	*nr_realms = nr;
-
-	/* Cleanup */
-	zbc_sg_cmd_destroy(&cmd);
+	*nr_realms = nr_filled;
 
 	return ret;
 }
