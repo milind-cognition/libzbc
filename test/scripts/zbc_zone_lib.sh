@@ -5,6 +5,35 @@
 # zbc_zone_lib.sh — Zone-related helper functions for the ZBC test suite.
 # Sourced by zbc_test_lib.sh; do not execute directly.
 
+/**
+ * @file zbc_zone_lib.sh
+ * @brief Zone-related helper functions for the ZBC/ZAC test suite.
+ *
+ * This shell library provides functions for querying, filtering, and
+ * manipulating zone information on Zoned Block Devices.  It is sourced
+ * by zbc_test_lib.sh and relies on shared variables such as @c bin_path,
+ * @c device, @c log_file, @c zone_info_file, and the zone-type/condition
+ * constants (e.g. @c ZT_CONV, @c ZT_SEQ, @c ZC_EMPTY, @c ZC_AVAIL).
+ *
+ * @note Do not execute this file directly; it must be sourced.
+ */
+
+/**
+ * @brief Retrieve zone information from the device and store it in the
+ *        zone info file.
+ *
+ * Runs @c zbc_test_report_zones with the given reporting-options value and
+ * writes the output to @c zone_info_file.  The command and timestamp are
+ * logged to @c log_file.
+ *
+ * @param $1 (optional) Reporting-options value passed to
+ *        @c zbc_test_report_zones.  Defaults to "0" if omitted.
+ *
+ * @return 0 always.
+ *
+ * @note Sets the global variable @c last_ro to the reporting-options value
+ *       that was used.
+ */
 function zbc_test_get_zone_info()
 {
 	if [ $# -eq 1 ]; then
@@ -26,12 +55,31 @@ function zbc_test_get_zone_info()
 
 ### [ZONE_INFO],<id>,<type>,<cond>,<slba>,<size>,<ptr>
 
+/**
+ * @brief Emit all zone records from the zone info file to stdout.
+ *
+ * Reads @c zone_info_file and filters lines matching the
+ * @c [ZONE_INFO] tag so they can be piped into further filter functions.
+ *
+ * @return 0 on success (grep exit status).
+ */
 # Issue all zone records to a pipeline
 function zbc_zones()
 {
 	cat ${zone_info_file} | grep -E "\[ZONE_INFO\]"
 }
 
+/**
+ * @brief Pipeline filter: keep only zones whose type matches the pattern.
+ *
+ * Reads @c [ZONE_INFO] records from stdin and passes through only those
+ * whose type field matches the extended-regex pattern given in @p $1.
+ *
+ * @param $1 Extended-regex pattern for zone types to keep
+ *           (e.g. "0x1" for conventional, "0x2|0x3" for sequential).
+ *
+ * @return 0 if at least one line matched; 1 otherwise (grep semantics).
+ */
 # Remove zones with NON-matching types from the pipeline
 # $1 examples:	0x1		match conventional zones, filter others out
 #		0x2|0x3		match sequential zones, filter others out
@@ -40,6 +88,17 @@ function zbc_zone_filter_in_type()
 	grep -E "\[ZONE_INFO\],.*,($1),.*,.*,.*,.*"
 }
 
+/**
+ * @brief Pipeline filter: remove zones whose type matches the pattern.
+ *
+ * Reads @c [ZONE_INFO] records from stdin and removes those whose type
+ * field matches the extended-regex pattern given in @p $1.
+ *
+ * @param $1 Extended-regex pattern for zone types to remove
+ *           (e.g. "0x1" to drop conventional, "0x2|0x3" to drop sequential).
+ *
+ * @return 0 if at least one line was passed through; 1 otherwise.
+ */
 # Remove zones with MATCHING types from the pipeline
 # $1 examples:	0x1		filter conventional zones out of the pipeline
 #		0x2|0x3		filter sequential zones out of the pipeline
@@ -48,6 +107,17 @@ function zbc_zone_filter_out_type()
 	grep -v -E "\[ZONE_INFO\],.*,($1),.*,.*,.*,.*"
 }
 
+/**
+ * @brief Pipeline filter: keep only zones whose condition matches the pattern.
+ *
+ * Reads @c [ZONE_INFO] records from stdin and passes through only those
+ * whose condition field matches the extended-regex pattern given in @p $1.
+ *
+ * @param $1 Extended-regex pattern for zone conditions to keep
+ *           (e.g. "0x1" for empty, "0x2|0x3" for open).
+ *
+ * @return 0 if at least one line matched; 1 otherwise.
+ */
 # Remove zones with NON-matching conditions from the pipeline
 # $1 examples:	0x1		match empty zones, filter others out
 #		0x2|0x3		match open zones, filter others out
@@ -57,6 +127,17 @@ function zbc_zone_filter_in_cond()
 	grep -E "\[ZONE_INFO\],.*,.*,($1),.*,.*,.*"
 }
 
+/**
+ * @brief Pipeline filter: remove zones whose condition matches the pattern.
+ *
+ * Reads @c [ZONE_INFO] records from stdin and removes those whose
+ * condition field matches the extended-regex pattern given in @p $1.
+ *
+ * @param $1 Extended-regex pattern for zone conditions to remove
+ *           (e.g. "0x1" to drop empty, "0x2|0x3" to drop open).
+ *
+ * @return 0 if at least one line was passed through; 1 otherwise.
+ */
 # Remove zones with MATCHING conditions from the pipeline
 # $1 examples:	0x1		filter empty zones out of pipeline
 #		0x2|0x3		filter open zones out of pipeline
@@ -68,26 +149,71 @@ function zbc_zone_filter_out_cond()
 
 # Preparation functions
 
+/**
+ * @brief Count the total number of zones and store the result in @c nr_zones.
+ *
+ * @deprecated This function is currently unused (prefixed UNUSED_).
+ *
+ * @return 0 always.
+ */
 function UNUSED_zbc_test_count_zones()
 {
 	nr_zones=`zbc_zones | wc -l`
 }
 
+/**
+ * @brief Count the number of conventional zones and store the result
+ *        in @c nr_conv_zones.
+ *
+ * @deprecated This function is currently unused (prefixed UNUSED_).
+ *
+ * @return 0 always.
+ */
 function UNUSED_zbc_test_count_conv_zones()
 {
 	nr_conv_zones=`zbc_zones | zbc_zone_filter_in_type "${ZT_CONV}" | wc -l`
 }
 
+/**
+ * @brief Count the number of sequential zones and store the result
+ *        in @c nr_seq_zones.
+ *
+ * @deprecated This function is currently unused (prefixed UNUSED_).
+ *
+ * @return 0 always.
+ */
 function UNUSED_zbc_test_count_seq_zones()
 {
 	nr_seq_zones=`zbc_zones | zbc_zone_filter_in_type "${ZT_SEQ}" | wc -l`
 }
 
+/**
+ * @brief Count the number of inactive zones and store the result
+ *        in @c nr_inactive_zones.
+ *
+ * @deprecated This function is currently unused (prefixed UNUSED_).
+ *
+ * @return 0 always.
+ */
 function UNUSED_zbc_test_count_inactive_zones()
 {
 	nr_inactive_zones=`zbc_zones | zbc_zone_filter_in_cond "${ZC_INACTIVE}" | wc -l`
 }
 
+/**
+ * @brief Check whether a zone is available for writing and set expected
+ *        error codes if it is not.
+ *
+ * Examines the zone type and condition and, when the zone cannot be
+ * written, populates @c alt_expected_sk and @c alt_expected_asc with
+ * the anticipated SCSI sense-key / ASC strings.
+ *
+ * @param $1 Zone type  (e.g. @c ZT_GAP, @c ZT_CONV).
+ * @param $2 Zone condition (e.g. @c ZC_OFFLINE, @c ZC_RDONLY, @c ZC_INACTIVE).
+ *
+ * @return 0 if the zone is available for writing.
+ * @return 1 if the zone is not available (error globals are set).
+ */
 # Set expected errors if zone is not available for write
 function zbc_write_check_available()
 {
@@ -113,6 +239,20 @@ function zbc_write_check_available()
 	return 1
 }
 
+/**
+ * @brief Check whether a zone is available for reading and set expected
+ *        error codes if it is not.
+ *
+ * Similar to @ref zbc_write_check_available but for read operations.
+ * Conventional zones are always readable.  When @c unrestricted_read is
+ * non-zero, most zone conditions are considered readable as well.
+ *
+ * @param $1 Zone type  (e.g. @c ZT_CONV, @c ZT_GAP).
+ * @param $2 Zone condition (e.g. @c ZC_OFFLINE, @c ZC_INACTIVE).
+ *
+ * @return 0 if the zone is available for reading.
+ * @return 1 if the zone is not available (error globals are set).
+ */
 # Set expected errors if zone is not available for read
 function zbc_read_check_available()
 {
@@ -139,6 +279,18 @@ function zbc_read_check_available()
 	return 1
 }
 
+/**
+ * @brief Explicitly open a given number of empty zones of the specified type.
+ *
+ * Iterates through empty zones matching @p $1 and explicitly opens them
+ * via @c zbc_test_open_zone until @p $2 zones have been opened.
+ *
+ * @param $1 Zone type pattern to match (e.g. @c ZT_SWR).
+ * @param $2 Number of zones to open.
+ *
+ * @return 0 if the requested number of zones were successfully opened.
+ * @return 1 if an open operation failed or not enough zones were found.
+ */
 # $1 is type of zones to open; $2 is number of zones to open
 # It is expected that the requested number can be opened
 function zbc_test_open_nr_zones()
@@ -184,6 +336,19 @@ function zbc_test_open_nr_zones()
 	return 1
 }
 
+/**
+ * @brief Implicitly open a given number of empty zones by writing to them.
+ *
+ * Iterates through empty zones matching @p $1 and implicitly opens them
+ * by writing @c lblk_per_pblk logical blocks via @c zbc_test_write_zone
+ * until @p $2 zones have been written.
+ *
+ * @param $1 Zone type pattern to match (e.g. @c ZT_SWR).
+ * @param $2 Number of zones to implicitly open.
+ *
+ * @return 0 if the requested number of zones were successfully written.
+ * @return 1 if a write operation failed or not enough zones were found.
+ */
 function zbc_test_iopen_nr_zones()
 {
 	local _zone_cond="${ZC_EMPTY}"
@@ -227,6 +392,20 @@ function zbc_test_iopen_nr_zones()
 	return 1
 }
 
+/**
+ * @brief Write to and then close a given number of empty zones.
+ *
+ * Iterates through empty zones matching @p $1, writes @c lblk_per_pblk
+ * logical blocks to each, and then explicitly closes them until @p $2
+ * zones have been processed.
+ *
+ * @param $1 Zone type pattern to match (e.g. @c ZT_SWR).
+ * @param $2 Number of zones to write-and-close.
+ *
+ * @return 0 if the requested number of zones were successfully closed.
+ * @return 1 if a write or close operation failed or not enough zones
+ *         were found.
+ */
 function zbc_test_close_nr_zones()
 {
 	local _zone_cond="${ZC_EMPTY}"
@@ -277,6 +456,21 @@ function zbc_test_close_nr_zones()
 	return 1
 }
 
+/**
+ * @brief Look up a zone by its start LBA, refreshing zone info first.
+ *
+ * Calls @ref zbc_test_get_zone_info to refresh the zone report, then
+ * searches for the zone whose start LBA matches @p $1.  On success the
+ * global target variables (@c target_type, @c target_cond, @c target_slba,
+ * @c target_size, @c target_ptr) are populated.
+ *
+ * Calls @c zbc_test_fail_exit if @p $1 is empty or if the LBA is not found.
+ *
+ * @param $1 Start LBA of the zone to look up.
+ *
+ * @return 0 if the zone was found (target globals are set).
+ * @return Does not return on failure (exits via @c zbc_test_fail_exit).
+ */
 # This function expects always to find the requested slba
 function zbc_test_get_target_zone_from_slba_or_fail()
 {
@@ -311,6 +505,18 @@ function zbc_test_get_target_zone_from_slba_or_fail()
 	zbc_test_fail_exit "Cannot find slba=${slba} in ${zone_info_file}"
 }
 
+/**
+ * @brief Look up a zone by its start LBA, using cached zone info when possible.
+ *
+ * Like @ref zbc_test_get_target_zone_from_slba_or_fail but avoids
+ * re-running @c zbc_test_report_zones when @c zone_info_file already
+ * exists and the last report used reporting-options "0".
+ *
+ * @param $1 Start LBA of the zone to look up.
+ *
+ * @return 0 if the zone was found (target globals are set).
+ * @return Does not return on failure (exits via @c zbc_test_fail_exit).
+ */
 # This function expects always to find the requested slba
 function zbc_test_get_target_zone_from_slba_or_fail_cached()
 {
@@ -349,6 +555,17 @@ function zbc_test_get_target_zone_from_slba_or_fail_cached()
 	zbc_test_fail_exit "Cannot find slba=${slba} in ${zone_info_file}"
 }
 
+/**
+ * @brief Compatibility wrapper for
+ *        @ref zbc_test_get_target_zone_from_slba_or_fail.
+ *
+ * This name is referenced by 81 existing test scripts.  It simply
+ * delegates to @ref zbc_test_get_target_zone_from_slba_or_fail.
+ *
+ * @param $@ All arguments are forwarded.
+ *
+ * @return Same as @ref zbc_test_get_target_zone_from_slba_or_fail.
+ */
 # Compatibility name is called from 81 scripts
 function zbc_test_get_target_zone_from_slba()
 {
@@ -357,6 +574,20 @@ function zbc_test_get_target_zone_from_slba()
 
 # These _search_ functions look for a zone aleady in the condition
 
+/**
+ * @brief Search for the first zone matching a given type and condition.
+ *
+ * Refreshes zone info, then iterates through zones filtered by @p $1
+ * (type) and @p $2 (condition).  On success the target globals
+ * (@c target_type, @c target_cond, @c target_slba, @c target_size,
+ * @c target_ptr) are populated with the first matching zone.
+ *
+ * @param $1 Extended-regex pattern for the desired zone type.
+ * @param $2 Extended-regex pattern for the desired zone condition.
+ *
+ * @return 0 if a matching zone was found.
+ * @return 1 if no matching zone exists.
+ */
 function zbc_test_search_target_zone_from_type_and_cond()
 {
 	local zone_type="${1}"
@@ -385,6 +616,15 @@ function zbc_test_search_target_zone_from_type_and_cond()
 	return 1
 }
 
+/**
+ * @brief Search for a GAP zone, or mark the test not-applicable.
+ *
+ * Looks for a zone of type @c ZT_GAP with condition @c ZC_NOT_WP.
+ * If none is found, exits via @c zbc_test_print_not_applicable.
+ *
+ * @return 0 if a GAP zone was found (target globals are set).
+ * @return Does not return if no GAP zone exists (exits N/A).
+ */
 function zbc_test_search_gap_zone_or_NA()
 {
 	local _zone_type="${ZT_GAP}"
@@ -396,6 +636,17 @@ function zbc_test_search_gap_zone_or_NA()
 	fi
 }
 
+/**
+ * @brief Retrieve the last zone of a given type.
+ *
+ * Refreshes zone info, filters by @p $1, and returns the values of the
+ * last zone in the list.  On success the target globals are populated.
+ *
+ * @param $1 Extended-regex pattern for the desired zone type.
+ *
+ * @return 0 if at least one zone of the given type was found.
+ * @return 1 if no zone of that type exists.
+ */
 function zbc_test_search_last_zone_vals_from_zone_type()
 {
 	local zone_type="${1}"
@@ -422,6 +673,22 @@ function zbc_test_search_last_zone_vals_from_zone_type()
 	return 1
 }
 
+/**
+ * @brief Select a zone for testing by condition, using the current
+ *        test zone type.
+ *
+ * If the global @c test_zone_type is set it is used as the type filter;
+ * otherwise @c ZT_SEQ (SWR|SWP) is used.  The zone condition defaults
+ * to @c ZC_AVAIL when @p $1 is omitted.
+ *
+ * On success the target globals are populated.
+ *
+ * @param $1 (optional) Extended-regex pattern for the desired zone
+ *           condition.  Defaults to @c ZC_AVAIL.
+ *
+ * @return 0 if a matching zone was found.
+ * @return 1 if no matching zone exists.
+ */
 # Select a zone for testing and return info.
 #
 # If ${test_zone_type} is set, search for that; otherwise search for SWR|SWP.
@@ -442,6 +709,19 @@ function zbc_test_search_zone_cond()
 	return 0
 }
 
+/**
+ * @brief Select a zone for testing by condition, or mark test not-applicable.
+ *
+ * Behaves like @ref zbc_test_search_zone_cond but exits via
+ * @c zbc_test_print_not_applicable instead of returning 1 when no
+ * matching zone is found.
+ *
+ * @param $1 (optional) Extended-regex pattern for the desired zone
+ *           condition.  Defaults to @c ZC_AVAIL.
+ *
+ * @return 0 if a matching zone was found (target globals are set).
+ * @return Does not return if no match (exits N/A).
+ */
 function zbc_test_search_zone_cond_or_NA()
 {
 	local _zone_type="${test_zone_type:-${ZT_SEQ}}"
@@ -454,6 +734,20 @@ function zbc_test_search_zone_cond_or_NA()
 	fi
 }
 
+/**
+ * @brief Select a Write-Pointer zone for testing, or mark test
+ *        not-applicable.
+ *
+ * Verifies that the test zone type is not conventional (@c ZT_CONV),
+ * then delegates to @ref zbc_test_search_zone_cond_or_NA.
+ *
+ * @param $1 (optional) Extended-regex pattern for the desired zone
+ *           condition.  Defaults to @c ZC_AVAIL.
+ *
+ * @return 0 if a matching write-pointer zone was found.
+ * @return Does not return if the type is conventional or no match
+ *         (exits N/A).
+ */
 # Select a Write-Pointer zone for testing and return info.
 # Argument and return information are the same as zbc_test_search_zone_cond_or_NA.
 function zbc_test_search_wp_zone_cond_or_NA()
@@ -468,6 +762,19 @@ function zbc_test_search_wp_zone_cond_or_NA()
 	zbc_test_search_zone_cond_or_NA "$@"
 }
 
+/**
+ * @brief Select a non-sequential zone for testing, or mark test
+ *        not-applicable.
+ *
+ * Searches for a zone of type @c ZT_NON_SEQ with the given condition
+ * (defaulting to @c ZC_AVAIL).  Exits N/A if none is found.
+ *
+ * @param $1 (optional) Extended-regex pattern for the desired zone
+ *           condition.  Defaults to @c ZC_AVAIL.
+ *
+ * @return 0 if a matching zone was found (target globals are set).
+ * @return Does not return if no match (exits N/A).
+ */
 # Select a non-Sequential zone for testing and return info.
 # Argument and return information are the same as zbc_test_search_zone_cond_or_NA.
 function zbc_test_search_non_seq_zone_cond_or_NA()
@@ -482,6 +789,19 @@ function zbc_test_search_non_seq_zone_cond_or_NA()
 	fi
 }
 
+/**
+ * @brief Select a sequential zone for testing by condition.
+ *
+ * Searches for a zone of type @c ZT_SEQ matching the given condition
+ * (defaulting to @c ZC_AVAIL).
+ *
+ * @param $1 (optional) Extended-regex pattern for the desired zone
+ *           condition.  Defaults to @c ZC_AVAIL.
+ *
+ * @return 0 if a matching sequential zone was found (target globals
+ *         are set).
+ * @return 1 if no matching zone exists.
+ */
 # Select a Sequential zone for testing and return info.
 # Argument and return information are the same as zbc_test_search_zone_cond_or_NA.
 function zbc_test_search_seq_zone_cond()
@@ -493,6 +813,19 @@ function zbc_test_search_seq_zone_cond()
 	return $?
 }
 
+/**
+ * @brief Select a sequential zone for testing, or mark test
+ *        not-applicable.
+ *
+ * Like @ref zbc_test_search_seq_zone_cond but exits via
+ * @c zbc_test_print_not_applicable when no match is found.
+ *
+ * @param $1 (optional) Extended-regex pattern for the desired zone
+ *           condition.  Defaults to @c ZC_AVAIL.
+ *
+ * @return 0 if a matching sequential zone was found.
+ * @return Does not return if no match (exits N/A).
+ */
 function zbc_test_search_seq_zone_cond_or_NA()
 {
 	local _zone_type="${ZT_SEQ}"
@@ -505,6 +838,19 @@ function zbc_test_search_seq_zone_cond_or_NA()
 	fi
 }
 
+/**
+ * @brief Find a contiguous sequence of available zones of a given type.
+ *
+ * Refreshes zone info and scans for @p $2 consecutive zones of type
+ * @p $1 that are all in an available condition (@c ZC_AVAIL).  On
+ * success the target globals are set to the first zone of the sequence.
+ *
+ * @param $1 Extended-regex pattern for the desired zone type.
+ * @param $2 Number of contiguous zones required.
+ *
+ * @return 0 if a contiguous sequence of the requested length was found.
+ * @return 1 (non-zero) if the request could not be met.
+ */
 # zbc_test_get_zones zone_type num_zones
 # Returns the first zone of a contiguous sequence of length nz with the specified type.
 # Returns non-zero if the request could not be met.
@@ -568,6 +914,21 @@ function zbc_test_get_zones()
 	return $ret
 }
 
+/**
+ * @brief Search for two adjacent zones with specified conditions.
+ *
+ * Scans zones of the given type looking for a pair of consecutive zones
+ * where the first has condition @p $2 and the second has condition @p $3.
+ * On success the target globals describe the first zone of the pair.
+ *
+ * @param $1 Extended-regex pattern for the desired zone type.
+ * @param $2 Extended-regex pattern for the condition of the first zone.
+ * @param $3 Extended-regex pattern for the condition of the second zone.
+ *
+ * @return 0 if a matching zone pair was found (target globals are set
+ *         to the first zone).
+ * @return 1 (non-zero) if no matching pair exists.
+ */
 function zbc_test_search_zone_pair()
 {
 	local zone_type="${1}"
@@ -640,6 +1001,19 @@ function zbc_test_search_zone_pair()
 	return $ret
 }
 
+/**
+ * @brief Search for a zone pair, or mark the test not-applicable.
+ *
+ * Delegates to @ref zbc_test_search_zone_pair and exits N/A when no
+ * matching pair is found.
+ *
+ * @param $1 Extended-regex pattern for the desired zone type.
+ * @param $2 Extended-regex pattern for the first zone's condition.
+ * @param $3 Extended-regex pattern for the second zone's condition.
+ *
+ * @return 0 if a matching pair was found.
+ * @return Does not return if no match (exits N/A).
+ */
 function zbc_test_search_zone_pair_or_NA()
 {
 	zbc_test_search_zone_pair "$@"
@@ -654,6 +1028,35 @@ function zbc_test_search_zone_pair_or_NA()
 
 # These _get_ functions set the zone(s) to the specified condition(s)
 
+/**
+ * @brief Obtain a contiguous sequence of zones and set each to a
+ *        requested condition.
+ *
+ * Finds @c nzone (= number of condition arguments) contiguous zones of
+ * type @p $1, then drives each zone into the condition specified by the
+ * corresponding positional parameter.  Supported condition strings:
+ *
+ * - @c EMPTY   -- reset the zone
+ * - @c IOPENZ  -- implicit open by writing zero LBAs
+ * - @c IOPENL  -- implicit open by writing @c lblk_per_pblk LBAs
+ * - @c IOPENH  -- implicit open by writing all but the last physical block
+ * - @c EOPEN   -- explicit open of an empty zone
+ * - @c CLOSEDL -- close after writing the first physical block
+ * - @c CLOSEDH -- close after writing all but the last physical block
+ * - @c FULL    -- write the entire zone
+ * - @c NOT_WP  -- valid only for conventional zones
+ *
+ * On success the target globals describe the first zone of the sequence
+ * after all conditions have been applied.
+ *
+ * @param $1     Extended-regex pattern for the desired zone type.
+ * @param $2...  One condition string per zone in the contiguous sequence.
+ *
+ * @return 0 if the zones were found and all conditions applied.
+ * @return 1 if a contiguous sequence of the required length was not found.
+ * @return Does not return if a condition is unsupported or a zone
+ *         operation fails (exits via @c zbc_test_fail_exit).
+ */
 # zbc_test_get_zones_cond type cond1 [cond2...]
 # Sets zbc_test_search_vals from the first zone of a
 #	contiguous sequence with the specified type and conditions
@@ -736,6 +1139,20 @@ function zbc_test_get_zones_cond()
 	return 0
 }
 
+/**
+ * @brief Obtain zones in a requested condition sequence, or mark test
+ *        not-applicable.
+ *
+ * Uses the current @c test_zone_type (defaulting to @c ZT_SEQ) and
+ * delegates to @ref zbc_test_get_zones_cond.  Exits N/A if a suitable
+ * contiguous zone sequence is not available.
+ *
+ * @param $1...  One or more condition strings (see
+ *               @ref zbc_test_get_zones_cond for the list).
+ *
+ * @return 0 if the zones were obtained and conditioned.
+ * @return Does not return if no suitable sequence exists (exits N/A).
+ */
 function zbc_test_get_zones_cond_or_NA()
 {
 	local _zone_type="${test_zone_type:-${ZT_SEQ}}"
@@ -752,6 +1169,20 @@ function zbc_test_get_zones_cond_or_NA()
 	fi
 }
 
+/**
+ * @brief Obtain Write-Pointer zones in a requested condition sequence,
+ *        or mark test not-applicable.
+ *
+ * Verifies that the test zone type is not conventional, then delegates
+ * to @ref zbc_test_get_zones_cond_or_NA.
+ *
+ * @param $1...  One or more condition strings (see
+ *               @ref zbc_test_get_zones_cond for the list).
+ *
+ * @return 0 if the zones were obtained and conditioned.
+ * @return Does not return if the type is conventional or no suitable
+ *         sequence exists (exits N/A).
+ */
 # zbc_test_get_wp_zones_cond_or_NA cond1 [cond2...]
 # Sets zbc_test_search_vals from the first zone of a
 #	contiguous sequence with the specified type and conditions
