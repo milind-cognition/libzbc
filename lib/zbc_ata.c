@@ -871,65 +871,18 @@ static int zbc_ata_report_realms(struct zbc_device *dev, uint64_t sector,
 	if (dev->zbd_info.zbd_flags & ZBC_STANDARD_RPT_REALMS) {
 		desc_len = zbc_ata_get_dword(&buf[4]);
 		if (!desc_len)
-			goto oldrealms; /* The field is reserved pre ZDr4, so it has to be 0 */
+			goto oldrealms; /* Reserved pre ZDr4, must be 0 */
+
+		/*
+		 * Standard path: pagination loop processes the first
+		 * response in-place, then fetches subsequent pages.
+		 */
 		next = zbc_ata_get_qword(&buf[8]);
+		goto first_page;
 
-		page_nr = (cmd.bufsz - ZBC_RPT_REALMS_HEADER_SIZE)
-			  / desc_len;
-		if (nr > page_nr)
-			nr = page_nr;
-
-		/* Get zone realm descriptors from this page */
-		buf += ZBC_RPT_REALMS_HEADER_SIZE;
-		for (i = 0; i < nr; i++, realms++) {
-			realms->zbr_number = zbc_ata_get_dword(buf);
-			realms->zbr_restr = zbc_ata_get_word(&buf[4]);
-			realms->zbr_dom_id = buf[7];
-			if (realms->zbr_dom_id < ZBC_NR_ZONE_TYPES)
-				realms->zbr_type =
-					domains[realms->zbr_dom_id].zbm_type;
-			realms->zbr_nr_domains = nr_domains;
-			ptr = buf + ZBC_RPT_REALMS_DESC_OFFSET;
-			/* FIXME use desc_len to limit iteration */
-			for (j = 0; j < nr_domains; j++) {
-				ri = &realms->zbr_ri[j];
-				ri->zbi_end_sector =
-					zbc_dev_lba2sect(dev,
-						zbc_ata_get_qword(ptr + 8));
-				if (ri->zbi_end_sector) {
-					realms->zbr_actv_flags |= (1 << j);
-					d = &domains[j];
-					ri->zbi_dom_id = j;
-					ri->zbi_type = d->zbm_type;
-					ri->zbi_start_sector =
-						zbc_dev_lba2sect(dev,
-							zbc_ata_get_qword(ptr));
-					if (d->zbm_nr_zones)
-						zone_size =
-						    zbc_zone_domain_zone_size(d);
-					else
-						zone_size = 0;
-					if (zone_size) {
-						ri->zbi_length =
-						    (ri->zbi_end_sector + 1 -
-						     ri->zbi_start_sector) /
-						    zone_size;
-					}
-				}
-				ptr += ZBC_RPT_REALMS_SE_DESC_SIZE;
-			}
-
-			buf += desc_len;
-		}
-
-		total_nr += nr;
-		*nr_realms -= nr;
-
-		zbc_sg_cmd_destroy(&cmd);
-
-		/* Fetch additional pages if available */
-		while (next != 0 && *nr_realms > 0) {
+		do {
 			lba = next;
+			zbc_sg_cmd_destroy(&cmd);
 
 			ret = zbc_sg_cmd_init(dev, &cmd, ZBC_SG_ATA16,
 					      NULL, bufsz);
@@ -977,18 +930,19 @@ static int zbc_ata_report_realms(struct zbc_device *dev, uint64_t sector,
 				zbc_sg_cmd_destroy(&cmd);
 				break;
 			}
-
 			if (nr > *nr_realms)
 				nr = *nr_realms;
 
 			desc_len = zbc_ata_get_dword(&buf[4]);
 			next = zbc_ata_get_qword(&buf[8]);
 
+first_page:
 			page_nr = (cmd.bufsz - ZBC_RPT_REALMS_HEADER_SIZE)
 				  / desc_len;
 			if (nr > page_nr)
 				nr = page_nr;
 
+			/* Parse zone realm descriptors from page */
 			buf += ZBC_RPT_REALMS_HEADER_SIZE;
 			for (i = 0; i < nr; i++, realms++) {
 				realms->zbr_number =
@@ -1001,6 +955,7 @@ static int zbc_ata_report_realms(struct zbc_device *dev, uint64_t sector,
 					    domains[realms->zbr_dom_id].zbm_type;
 				realms->zbr_nr_domains = nr_domains;
 				ptr = buf + ZBC_RPT_REALMS_DESC_OFFSET;
+				/* FIXME use desc_len to limit iteration */
 				for (j = 0; j < nr_domains; j++) {
 					ri = &realms->zbr_ri[j];
 					ri->zbi_end_sector =
@@ -1036,8 +991,9 @@ static int zbc_ata_report_realms(struct zbc_device *dev, uint64_t sector,
 			total_nr += nr;
 			*nr_realms -= nr;
 
-			zbc_sg_cmd_destroy(&cmd);
-		}
+		} while (next != 0 && *nr_realms > 0);
+
+		zbc_sg_cmd_destroy(&cmd);
 
 		if (domains)
 			free(domains);
