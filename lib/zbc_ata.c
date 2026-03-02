@@ -749,6 +749,28 @@ out:
 }
 
 /**
+ * Fill the CDB for a REPORT REALMS ATA16 command.
+ */
+static void zbc_ata_fill_report_realms_cdb(struct zbc_sg_cmd *cmd,
+					   enum zbc_realm_report_options ro,
+					   size_t bufsz, uint64_t lba)
+{
+	cmd->io_hdr.dxfer_direction = SG_DXFER_FROM_DEV;
+	cmd->cdb[0] = ZBC_SG_ATA16_CDB_OPCODE;
+	/* DMA protocol, ext=1 */
+	cmd->cdb[1] = (0x06 << 1) | 0x01;
+	/* off_line=0, ck_cond=0, t_type=0, t_dir=1, byt_blk=1, t_length=10 */
+	cmd->cdb[2] = 0x0e;
+	cmd->cdb[3] = ro & 0x3f;
+	cmd->cdb[4] = ZBC_ATA_REPORT_REALMS_AF;
+	cmd->cdb[5] = ((bufsz / 512) >> 8) & 0xff;
+	cmd->cdb[6] = (bufsz / 512) & 0xff;
+	zbc_ata_put_lba(cmd->cdb, lba);
+	cmd->cdb[13] = 1 << 6;
+	cmd->cdb[14] = ZBC_ATA_ZAC_MANAGEMENT_IN;
+}
+
+/**
  * Report device zone realm configuration.
  */
 static int zbc_ata_report_realms(struct zbc_device *dev, uint64_t sector,
@@ -799,46 +821,8 @@ static int zbc_ata_report_realms(struct zbc_device *dev, uint64_t sector,
 		return ret;
 	}
 
-	/* Fill command CDB:
-	 * +=============================================================================+
-	 * |  Bit|   7    |   6    |   5    |   4    |   3    |   2    |   1    |   0    |
-	 * |Byte |        |        |        |        |        |        |        |        |
-	 * |=====+==========================+============================================|
-	 * | 0   |                           Operation Code (85h)                        |
-	 * |-----+-----------------------------------------------------------------------|
-	 * | 1   |      Multiple count      |              Protocol             |  ext   |
-	 * |-----+-----------------------------------------------------------------------|
-	 * | 2   |    off_line     |ck_cond | t_type | t_dir  |byt_blk |    t_length     |
-	 * |-----+-----------------------------------------------------------------------|
-	 * | 3   |                  features (15:8) Reporting options                    |
-	 * |-----+-----------------------------------------------------------------------|
-	 * | 4   |                   features (7:0), action (06h)                        |
-	 * |-----+-----------------------------------------------------------------------|
-	 * | 5-6 |                                count                                  |
-	 * |-----+-----------------------------------------------------------------------|
-	 * | 7-12|                             LBA (ZONE ID)                             |
-	 * |-----+-----------------------------------------------------------------------|
-	 * | 13  |                   Device, bit 6 shall be set to 1                     |
-	 * |-----+-----------------------------------------------------------------------|
-	 * | 14  |                           Command (4Ah)                               |
-	 * |-----+-----------------------------------------------------------------------|
-	 * | 15  |                             Control                                   |
-	 * +=============================================================================+
-	 */
-	cmd.io_hdr.dxfer_direction = SG_DXFER_FROM_DEV;
-	cmd.cdb[0] = ZBC_SG_ATA16_CDB_OPCODE;
-	/* DMA protocol, ext=1 */
-	cmd.cdb[1] = (0x06 << 1) | 0x01;
-	/* off_line=0, ck_cond=0, t_type=0, t_dir=1, byt_blk=1, t_length=10 */
-	cmd.cdb[2] = 0x0e;
-	/* Fill RO, ZONE ID, AF, Count and Device */
-	cmd.cdb[3] = ro & 0x3f;
-	cmd.cdb[4] = ZBC_ATA_REPORT_REALMS_AF;
-	cmd.cdb[5] = ((bufsz / 512) >> 8) & 0xff;
-	cmd.cdb[6] = (bufsz / 512) & 0xff;
-	zbc_ata_put_lba(cmd.cdb, lba);
-	cmd.cdb[13] = 1 << 6;
-	cmd.cdb[14] = ZBC_ATA_ZAC_MANAGEMENT_IN;
+	/* Fill command CDB for REPORT REALMS */
+	zbc_ata_fill_report_realms_cdb(&cmd, ro, bufsz, lba);
 
 	/* Send the SG_IO command */
 	ret = zbc_sg_cmd_exec(dev, &cmd);
@@ -892,17 +876,7 @@ static int zbc_ata_report_realms(struct zbc_device *dev, uint64_t sector,
 				return ret;
 			}
 
-			cmd.io_hdr.dxfer_direction = SG_DXFER_FROM_DEV;
-			cmd.cdb[0] = ZBC_SG_ATA16_CDB_OPCODE;
-			cmd.cdb[1] = (0x06 << 1) | 0x01;
-			cmd.cdb[2] = 0x0e;
-			cmd.cdb[3] = ro & 0x3f;
-			cmd.cdb[4] = ZBC_ATA_REPORT_REALMS_AF;
-			cmd.cdb[5] = ((bufsz / 512) >> 8) & 0xff;
-			cmd.cdb[6] = (bufsz / 512) & 0xff;
-			zbc_ata_put_lba(cmd.cdb, lba);
-			cmd.cdb[13] = 1 << 6;
-			cmd.cdb[14] = ZBC_ATA_ZAC_MANAGEMENT_IN;
+			zbc_ata_fill_report_realms_cdb(&cmd, ro, bufsz, lba);
 
 			ret = zbc_sg_cmd_exec(dev, &cmd);
 			if (ret) {
