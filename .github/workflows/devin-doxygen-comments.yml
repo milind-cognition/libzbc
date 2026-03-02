@@ -10,39 +10,64 @@ on:
         required: false
         default: ""
 
-  push:
+  pull_request:
     branches:
       - master
+    types:
+      - opened
 
 # Branch naming convention for Devin sessions spawned by this action:
 #   devin/gha-doxygen-*
-# When such a branch is merged to master, the workflow detects the pattern
-# in the merge commit message and skips, preventing an infinite loop.
+# When a PR is opened from such a branch, the workflow detects the pattern
+# in the head branch name and skips, preventing an infinite loop.
 
 jobs:
   trigger-devin:
     runs-on: ubuntu-latest
     steps:
-      - name: Check for Devin-authored merge and skip if so
+      - name: Check for Devin-authored PR and skip if so
         id: loop-guard
         env:
-          COMMIT_MSG: ${{ github.event.head_commit.message }}
+          HEAD_BRANCH: ${{ github.head_ref }}
         run: |
-          if echo "$COMMIT_MSG" | grep -qiE 'devin/gha-doxygen-'; then
-            echo "Skipping: this push is from a Devin-created doxygen PR."
+          if echo "$HEAD_BRANCH" | grep -qE '^devin/gha-doxygen-'; then
+            echo "Skipping: this PR was created by a Devin doxygen session."
             echo "skip=true" >> "$GITHUB_OUTPUT"
           else
             echo "skip=false" >> "$GITHUB_OUTPUT"
           fi
+
+      - name: Checkout repo to compute PR diff
+        if: steps.loop-guard.outputs.skip != 'true' && github.event_name == 'pull_request'
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get changed files from PR
+        if: steps.loop-guard.outputs.skip != 'true' && github.event_name == 'pull_request'
+        id: changed-files
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          CHANGED=$(git diff --name-only "$BASE_SHA" "$HEAD_SHA" | tr '\n' ', ' | sed 's/,$//')
+          echo "files=$CHANGED" >> "$GITHUB_OUTPUT"
 
       - name: Kick off Devin session
         if: steps.loop-guard.outputs.skip != 'true'
         env:
           DEVIN_API_KEY: ${{ secrets.DEVIN_API_KEY }}
           SCOPE: ${{ github.event.inputs.scope }}
+          PR_CHANGED_FILES: ${{ steps.changed-files.outputs.files }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          EVENT_NAME: ${{ github.event_name }}
         run: |
-
-          if [ -z "$SCOPE" ]; then
+          # For pull_request triggers, scope to the files changed in the PR.
+          # For workflow_dispatch, use the user-provided scope or default to all.
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            SCOPE_INSTRUCTION="ONLY the files changed in PR #${PR_NUMBER} (${PR_TITLE}): ${PR_CHANGED_FILES}"
+          elif [ -z "$SCOPE" ]; then
             SCOPE_INSTRUCTION="all public header files under include/libzbc/ and all library source files under lib/"
           else
             SCOPE_INSTRUCTION="the following files/directories: $SCOPE"
@@ -52,6 +77,11 @@ jobs:
           You are working on the milind-cognition/libzbc repository — a C library for managing Zoned Block Devices (ZBD).
 
           Your task: Add Doxygen-compatible documentation comments to SCOPE_PLACEHOLDER so that running Doxygen picks them up and produces complete API documentation.
+
+          IMPORTANT: You should ONLY add or update Doxygen comments for the code
+          that was added or changed in the specified files. Do NOT modify other
+          files or add comments across the entire codebase. Focus exclusively on
+          ensuring the new/changed code in those files has proper Doxygen comments.
 
           Guidelines:
           1. Use /** ... */ comment blocks (C-style Doxygen comments).
@@ -69,7 +99,6 @@ jobs:
           9. Create a PR with your changes when done.
 
           The main public header is include/libzbc/zbc.h. The internal library sources are in lib/.
-          Focus on making sure every function, struct, enum, typedef, and macro has proper Doxygen comments.
           ENDOFPROMPT
           )
 
