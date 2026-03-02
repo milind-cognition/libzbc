@@ -1544,6 +1544,17 @@ int zbc_get_zbd_stats(struct zbc_device *dev,
 	return (dev->zbd_drv->zbd_get_stats)(dev, stats);
 }
 
+/**
+ * @brief Get zone statistics for a device
+ * @param[in] dev	Device handle obtained with \a zbc_open
+ * @param[out] stats	Pointer to a \a zbc_zone_stats structure to fill
+ *
+ * Query all zones of \a dev via \a zbc_list_zones and accumulate
+ * per-type and per-condition counts, total capacity, and
+ * write-pointer-based utilization into \a stats.
+ *
+ * @return 0 on success or a negative error code on failure.
+ */
 int zbc_get_zone_stats(struct zbc_device *dev, struct zbc_zone_stats *stats)
 {
 	struct zbc_zone *zones = NULL;
@@ -1627,6 +1638,15 @@ int zbc_get_zone_stats(struct zbc_device *dev, struct zbc_zone_stats *stats)
 	return 0;
 }
 
+/**
+ * @brief Print a formatted zone statistics summary
+ * @param[in] stats	Pointer to a populated \a zbc_zone_stats structure
+ * @param[in] out	Output file stream (e.g. \c stdout)
+ *
+ * Prints a human-readable summary of the zone statistics contained in
+ * \a stats to the file stream \a out.  Does nothing if \a stats or
+ * \a out is NULL.
+ */
 void zbc_print_zone_stats(struct zbc_zone_stats *stats, FILE *out)
 {
 	unsigned int total_zones;
