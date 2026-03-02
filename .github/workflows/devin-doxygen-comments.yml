@@ -1,3 +1,21 @@
+# /**
+#  * @file devin-doxygen-comments.yml
+#  * @brief GitHub Actions workflow that triggers a Devin AI session to add
+#  *        Doxygen-compatible documentation comments to changed files.
+#  *
+#  * Activated on manual dispatch (workflow_dispatch) or when a pull request is
+#  * opened against master.  For PR triggers the workflow computes the list of
+#  * changed files and passes them as the documentation scope.  For manual
+#  * triggers the caller may supply an explicit scope or leave it blank to
+#  * default to all public headers and library sources.
+#  *
+#  * A loop-prevention guard skips execution when the head branch matches
+#  * the "devin/gha-doxygen-*" pattern so that PRs created by this very
+#  * workflow do not re-trigger it.
+#  *
+#  * @note Requires the DEVIN_API_KEY repository secret.
+#  */
+
 name: Add Doxygen Comments via Devin
 
 on:
@@ -23,6 +41,20 @@ on:
 
 jobs:
   trigger-devin:
+    # /**
+    #  * @brief Compute the documentation scope and launch a Devin AI session.
+    #  *
+    #  * Steps:
+    #  *   1. Check whether the PR was authored by a previous Devin doxygen
+    #  *      session (loop guard).
+    #  *   2. Check out the repository with full history to compute the diff.
+    #  *   3. Determine the list of files changed in the PR.
+    #  *   4. POST to the Devin API to create a new documentation session,
+    #  *      passing the computed scope and a detailed prompt.
+    #  *
+    #  * @note Skipped when the head branch matches devin/gha-doxygen-* to
+    #  *       prevent infinite workflow loops.
+    #  */
     runs-on: ubuntu-latest
     steps:
       - name: Check for Devin-authored PR and skip if so
