@@ -1544,3 +1544,129 @@ int zbc_get_zbd_stats(struct zbc_device *dev,
 	return (dev->zbd_drv->zbd_get_stats)(dev, stats);
 }
 
+int zbc_get_zone_stats(struct zbc_device *dev, struct zbc_zone_stats *stats)
+{
+	struct zbc_zone *zones = NULL;
+	unsigned int nr_zones;
+	unsigned int i;
+	int ret;
+
+	if (!dev || !stats)
+		return -EINVAL;
+
+	memset(stats, 0, sizeof(*stats));
+
+	ret = zbc_list_zones(dev, 0, ZBC_RO_ALL, &zones, &nr_zones);
+	if (ret < 0)
+		return ret;
+
+	for (i = 0; i < nr_zones; i++) {
+		struct zbc_zone *z = &zones[i];
+
+		stats->zbs_total_capacity_sectors += zbc_zone_length(z);
+
+		switch (zbc_zone_type(z)) {
+		case ZBC_ZT_CONVENTIONAL:
+			stats->zbs_nr_conventional++;
+			break;
+		case ZBC_ZT_SEQUENTIAL_REQ:
+			stats->zbs_nr_seq_write_req++;
+			break;
+		case ZBC_ZT_SEQUENTIAL_PREF:
+			stats->zbs_nr_seq_write_pref++;
+			break;
+		case ZBC_ZT_SEQ_OR_BEF_REQ:
+			stats->zbs_nr_sobr++;
+			break;
+		case ZBC_ZT_GAP:
+			stats->zbs_nr_gap++;
+			break;
+		default:
+			break;
+		}
+
+		switch (zbc_zone_condition(z)) {
+		case ZBC_ZC_EMPTY:
+			stats->zbs_nr_empty++;
+			break;
+		case ZBC_ZC_IMP_OPEN:
+			stats->zbs_nr_imp_open++;
+			break;
+		case ZBC_ZC_EXP_OPEN:
+			stats->zbs_nr_exp_open++;
+			break;
+		case ZBC_ZC_CLOSED:
+			stats->zbs_nr_closed++;
+			break;
+		case ZBC_ZC_FULL:
+			stats->zbs_nr_full++;
+			break;
+		case ZBC_ZC_RDONLY:
+			stats->zbs_nr_rdonly++;
+			break;
+		case ZBC_ZC_OFFLINE:
+			stats->zbs_nr_offline++;
+			break;
+		case ZBC_ZC_INACTIVE:
+			stats->zbs_nr_inactive++;
+			break;
+		default:
+			break;
+		}
+
+		if (!zbc_zone_conventional(z) && !zbc_zone_gap(z)) {
+			uint64_t wp = zbc_zone_wp(z);
+			uint64_t start = zbc_zone_start(z);
+
+			if (wp > start)
+				stats->zbs_written_sectors += wp - start;
+		}
+	}
+
+	free(zones);
+	return 0;
+}
+
+void zbc_print_zone_stats(struct zbc_zone_stats *stats, FILE *out)
+{
+	unsigned int total_zones;
+
+	if (!stats || !out)
+		return;
+
+	total_zones = stats->zbs_nr_conventional +
+		      stats->zbs_nr_seq_write_req +
+		      stats->zbs_nr_seq_write_pref +
+		      stats->zbs_nr_sobr +
+		      stats->zbs_nr_gap;
+
+	fprintf(out, "Zone Statistics Summary:\n");
+	fprintf(out, "  Total zones: %u\n", total_zones);
+	fprintf(out, "  By type:\n");
+	fprintf(out, "    Conventional:               %u\n",
+		stats->zbs_nr_conventional);
+	fprintf(out, "    Sequential write required:   %u\n",
+		stats->zbs_nr_seq_write_req);
+	fprintf(out, "    Sequential write preferred:  %u\n",
+		stats->zbs_nr_seq_write_pref);
+	fprintf(out, "    Seq-or-before required:      %u\n",
+		stats->zbs_nr_sobr);
+	fprintf(out, "    Gap:                         %u\n",
+		stats->zbs_nr_gap);
+	fprintf(out, "  By condition:\n");
+	fprintf(out, "    Empty:          %u\n", stats->zbs_nr_empty);
+	fprintf(out, "    Implicit open:  %u\n", stats->zbs_nr_imp_open);
+	fprintf(out, "    Explicit open:  %u\n", stats->zbs_nr_exp_open);
+	fprintf(out, "    Closed:         %u\n", stats->zbs_nr_closed);
+	fprintf(out, "    Full:           %u\n", stats->zbs_nr_full);
+	fprintf(out, "    Read-only:      %u\n", stats->zbs_nr_rdonly);
+	fprintf(out, "    Offline:        %u\n", stats->zbs_nr_offline);
+	fprintf(out, "    Inactive:       %u\n", stats->zbs_nr_inactive);
+	fprintf(out, "  Capacity: %llu sectors\n",
+		(unsigned long long)stats->zbs_total_capacity_sectors);
+	fprintf(out, "  Written:  %llu sectors\n",
+		(unsigned long long)stats->zbs_written_sectors);
+	fprintf(out, "  Utilization: %.1f%%\n",
+		zbc_zone_stats_utilization(stats) * 100.0);
+}
+

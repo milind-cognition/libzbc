@@ -2329,6 +2329,48 @@ extern int zbc_map_iov(const void *buf, size_t sectors,
  */
 extern int zbc_flush(struct zbc_device *dev);
 
+struct zbc_zone_stats {
+	unsigned int	zbs_nr_conventional;
+	unsigned int	zbs_nr_seq_write_req;
+	unsigned int	zbs_nr_seq_write_pref;
+	unsigned int	zbs_nr_sobr;
+	unsigned int	zbs_nr_gap;
+	unsigned int	zbs_nr_empty;
+	unsigned int	zbs_nr_imp_open;
+	unsigned int	zbs_nr_exp_open;
+	unsigned int	zbs_nr_closed;
+	unsigned int	zbs_nr_full;
+	unsigned int	zbs_nr_rdonly;
+	unsigned int	zbs_nr_offline;
+	unsigned int	zbs_nr_inactive;
+	uint64_t	zbs_total_capacity_sectors;
+	uint64_t	zbs_written_sectors;
+};
+
+extern int zbc_get_zone_stats(struct zbc_device *dev,
+			      struct zbc_zone_stats *stats);
+
+extern void zbc_print_zone_stats(struct zbc_zone_stats *stats, FILE *out);
+
+static inline unsigned int zbc_zone_stats_nr_open(struct zbc_zone_stats *st)
+{
+	return st->zbs_nr_imp_open + st->zbs_nr_exp_open;
+}
+
+static inline unsigned int zbc_zone_stats_nr_active(struct zbc_zone_stats *st)
+{
+	return st->zbs_nr_imp_open + st->zbs_nr_exp_open +
+	       st->zbs_nr_closed + st->zbs_nr_full;
+}
+
+static inline double zbc_zone_stats_utilization(struct zbc_zone_stats *st)
+{
+	if (st->zbs_total_capacity_sectors == 0)
+		return 0.0;
+	return (double)st->zbs_written_sectors /
+	       (double)st->zbs_total_capacity_sectors;
+}
+
 /**
  * @}
  */
