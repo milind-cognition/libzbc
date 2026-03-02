@@ -2329,40 +2329,125 @@ extern int zbc_map_iov(const void *buf, size_t sectors,
  */
 extern int zbc_flush(struct zbc_device *dev);
 
+/**
+ * @brief Zone statistics summary data structure
+ *
+ * Aggregates zone counts by type and condition, total capacity, and
+ * write-pointer-based utilization for a device. Populated by
+ * \a zbc_get_zone_stats.
+ */
 struct zbc_zone_stats {
+
+	/** Number of conventional zones. */
 	unsigned int	zbs_nr_conventional;
+
+	/** Number of sequential write required zones. */
 	unsigned int	zbs_nr_seq_write_req;
+
+	/** Number of sequential write preferred zones. */
 	unsigned int	zbs_nr_seq_write_pref;
+
+	/** Number of sequential-or-before-required (SOBR) zones. */
 	unsigned int	zbs_nr_sobr;
+
+	/** Number of gap zones. */
 	unsigned int	zbs_nr_gap;
+
+	/** Number of zones in the empty condition. */
 	unsigned int	zbs_nr_empty;
+
+	/** Number of zones in the implicitly opened condition. */
 	unsigned int	zbs_nr_imp_open;
+
+	/** Number of zones in the explicitly opened condition. */
 	unsigned int	zbs_nr_exp_open;
+
+	/** Number of zones in the closed condition. */
 	unsigned int	zbs_nr_closed;
+
+	/** Number of zones in the full condition. */
 	unsigned int	zbs_nr_full;
+
+	/** Number of zones in the read-only condition. */
 	unsigned int	zbs_nr_rdonly;
+
+	/** Number of zones in the offline condition. */
 	unsigned int	zbs_nr_offline;
+
+	/** Number of zones in the inactive condition. */
 	unsigned int	zbs_nr_inactive;
+
+	/** Total capacity of all zones in 512B sectors. */
 	uint64_t	zbs_total_capacity_sectors;
+
+	/** Total number of written 512B sectors (write-pointer based). */
 	uint64_t	zbs_written_sectors;
 };
 
+/**
+ * @brief Get zone statistics for a device
+ * @param[in] dev	Device handle obtained with \a zbc_open
+ * @param[out] stats	Pointer to a \a zbc_zone_stats structure to fill
+ *
+ * Query all zones of \a dev and accumulate per-type and per-condition
+ * counts, total capacity, and write-pointer-based utilization into
+ * \a stats.
+ *
+ * @return 0 on success or a negative error code on failure
+ * (-EINVAL if \a dev or \a stats is NULL, or any error returned by
+ * \a zbc_list_zones).
+ */
 extern int zbc_get_zone_stats(struct zbc_device *dev,
 			      struct zbc_zone_stats *stats);
 
+/**
+ * @brief Print a formatted zone statistics summary
+ * @param[in] stats	Pointer to a populated \a zbc_zone_stats structure
+ * @param[in] out	Output file stream (e.g. \c stdout)
+ *
+ * Prints a human-readable summary of the zone statistics contained in
+ * \a stats to the file stream \a out. Does nothing if \a stats or
+ * \a out is NULL.
+ */
 extern void zbc_print_zone_stats(struct zbc_zone_stats *stats, FILE *out);
 
+/**
+ * @brief Get the total number of open zones
+ * @param[in] st	Pointer to a populated \a zbc_zone_stats structure
+ *
+ * Returns the sum of implicitly and explicitly opened zones.
+ *
+ * @return Total number of open zones (implicit + explicit).
+ */
 static inline unsigned int zbc_zone_stats_nr_open(struct zbc_zone_stats *st)
 {
 	return st->zbs_nr_imp_open + st->zbs_nr_exp_open;
 }
 
+/**
+ * @brief Get the total number of active zones
+ * @param[in] st	Pointer to a populated \a zbc_zone_stats structure
+ *
+ * Returns the sum of implicitly opened, explicitly opened, closed,
+ * and full zones.
+ *
+ * @return Total number of active zones.
+ */
 static inline unsigned int zbc_zone_stats_nr_active(struct zbc_zone_stats *st)
 {
 	return st->zbs_nr_imp_open + st->zbs_nr_exp_open +
 	       st->zbs_nr_closed + st->zbs_nr_full;
 }
 
+/**
+ * @brief Get the device zone utilization ratio
+ * @param[in] st	Pointer to a populated \a zbc_zone_stats structure
+ *
+ * Computes the ratio of written sectors to total capacity sectors.
+ * Returns 0.0 if the total capacity is zero.
+ *
+ * @return Utilization as a value between 0.0 and 1.0.
+ */
 static inline double zbc_zone_stats_utilization(struct zbc_zone_stats *st)
 {
 	if (st->zbs_total_capacity_sectors == 0)
