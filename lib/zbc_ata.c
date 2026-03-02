@@ -853,64 +853,70 @@ static int zbc_ata_report_realms(struct zbc_device *dev, uint64_t sector,
 		nr = *nr_realms;
 
 	if (dev->zbd_info.zbd_flags & ZBC_STANDARD_RPT_REALMS) {
+		bool first_page = true;
+
 		desc_len = zbc_ata_get_dword(&buf[4]);
 		if (!desc_len)
 			goto oldrealms; /* Reserved pre ZDr4, must be 0 */
 
-		/*
-		 * Standard path: pagination loop processes the first
-		 * response in-place, then fetches subsequent pages.
-		 */
 		next = zbc_ata_get_qword(&buf[8]);
-		goto first_page;
 
+		/*
+		 * Standard path: process the first response that was
+		 * already fetched, then loop for subsequent pages.
+		 */
 		do {
-			lba = next;
-			zbc_sg_cmd_destroy(&cmd);
-
-			ret = zbc_sg_cmd_init(dev, &cmd, ZBC_SG_ATA16,
-					      NULL, bufsz);
-			if (ret != 0) {
-				free(domains);
-				*nr_realms = total_nr;
-				return ret;
-			}
-
-			zbc_ata_fill_report_realms_cdb(&cmd, ro, bufsz, lba);
-
-			ret = zbc_sg_cmd_exec(dev, &cmd);
-			if (ret) {
-				zbc_ata_get_sense_data(dev, &cmd, ret);
+			if (!first_page) {
+				lba = next;
 				zbc_sg_cmd_destroy(&cmd);
-				break;
+
+				ret = zbc_sg_cmd_init(dev, &cmd,
+						      ZBC_SG_ATA16,
+						      NULL, bufsz);
+				if (ret != 0) {
+					free(domains);
+					*nr_realms = total_nr;
+					return ret;
+				}
+
+				zbc_ata_fill_report_realms_cdb(&cmd, ro,
+							       bufsz, lba);
+
+				ret = zbc_sg_cmd_exec(dev, &cmd);
+				if (ret) {
+					zbc_ata_get_sense_data(dev, &cmd,
+							       ret);
+					zbc_sg_cmd_destroy(&cmd);
+					break;
+				}
+
+				if (cmd.bufsz < ZBC_RPT_REALMS_HEADER_SIZE) {
+					zbc_error("%s: Not enough REPORT"
+						  " REALMS data received"
+						  " (need at least %d B,"
+						  " got %zu B)\n",
+						  dev->zbd_filename,
+						  ZBC_RPT_REALMS_HEADER_SIZE,
+						  cmd.bufsz);
+					ret = -EIO;
+					zbc_sg_cmd_destroy(&cmd);
+					break;
+				}
+
+				buf = cmd.buf;
+				nr = zbc_ata_get_dword(&buf[0]);
+				if (!nr) {
+					zbc_sg_cmd_destroy(&cmd);
+					break;
+				}
+				if (nr > *nr_realms)
+					nr = *nr_realms;
+
+				desc_len = zbc_ata_get_dword(&buf[4]);
+				next = zbc_ata_get_qword(&buf[8]);
 			}
+			first_page = false;
 
-			if (cmd.bufsz < ZBC_RPT_REALMS_HEADER_SIZE) {
-				zbc_error("%s: Not enough REPORT REALMS"
-					  " data received"
-					  " (need at least %d B,"
-					  " got %zu B)\n",
-					  dev->zbd_filename,
-					  ZBC_RPT_REALMS_HEADER_SIZE,
-					  cmd.bufsz);
-				ret = -EIO;
-				zbc_sg_cmd_destroy(&cmd);
-				break;
-			}
-
-			buf = cmd.buf;
-			nr = zbc_ata_get_dword(&buf[0]);
-			if (!nr) {
-				zbc_sg_cmd_destroy(&cmd);
-				break;
-			}
-			if (nr > *nr_realms)
-				nr = *nr_realms;
-
-			desc_len = zbc_ata_get_dword(&buf[4]);
-			next = zbc_ata_get_qword(&buf[8]);
-
-first_page:
 			page_nr = (cmd.bufsz - ZBC_RPT_REALMS_HEADER_SIZE)
 				  / desc_len;
 			if (nr > page_nr)
