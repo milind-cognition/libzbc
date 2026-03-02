@@ -749,7 +749,28 @@ out:
 }
 
 /**
- * Report device zone realm configuration.
+ * @brief Report device zone realm configuration via ATA passthrough.
+ *
+ * Retrieves zone realm descriptors from an ATA ZAC device using ATA16
+ * passthrough commands. Supports pagination via the NEXT REALM LOCATOR
+ * field for ZDr4+ standard devices. For legacy (pre-ZDr4) devices and
+ * non-standard devices, a single page is fetched with no pagination.
+ *
+ * Zone domain information is fetched first and used to populate realm
+ * item details (type, start/end sectors, zone count per domain).
+ *
+ * @param[in]  dev        Pointer to the ZBC device handle.
+ * @param[in]  sector     Start sector for the realm report query,
+ *                        converted internally to LBA.
+ * @param[in]  ro         Reporting options filter for the realms query.
+ * @param[out] realms     Caller-allocated array to receive zone realm
+ *                        descriptors. May be NULL to query count only.
+ * @param[in,out] nr_realms  On input, maximum number of realm descriptors
+ *                           to return. On output, actual number filled
+ *                           across all pages.
+ *
+ * @return 0 on success, negative errno value on failure (e.g. -ENOMEM,
+ *         -ENXIO, -EIO).
  */
 static int zbc_ata_report_realms(struct zbc_device *dev, uint64_t sector,
 				 enum zbc_realm_report_options ro,
