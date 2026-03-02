@@ -17,8 +17,8 @@ jobs:
       - name: Kick off Devin session
         env:
           DEVIN_API_KEY: ${{ secrets.DEVIN_API_KEY }}
+          SCOPE: ${{ github.event.inputs.scope }}
         run: |
-          SCOPE="${{ github.event.inputs.scope }}"
 
           if [ -z "$SCOPE" ]; then
             SCOPE_INSTRUCTION="all public header files under include/libzbc/ and all library source files under lib/"
