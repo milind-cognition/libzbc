@@ -2071,7 +2071,7 @@ function zbc_test_check_err()
 	if [ -n "${ZBC_ACCEPT_ANY_FAIL}" -a -n "${expected_err_za}" ]; then
 		if [ -n "${sk}" ]; then
 			expected_err_za="${err_za}"
-			err_cbf="${expected_err_cbf}"
+			expected_err_cbf="${err_cbf}"
 			expected_sk="${sk}"
 			expected_asc="${asc}"
 		fi
