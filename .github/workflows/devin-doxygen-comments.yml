@@ -1,57 +1,157 @@
 # /**
 #  * @file devin-doxygen-comments.yml
-#  * @brief GitHub Actions workflow that generates Doxygen API documentation.
+#  * @brief GitHub Actions workflow that triggers a Devin AI session to add
+#  *        Doxygen-compatible documentation comments to changed files.
 #  *
-#  * Runs Doxygen against the repository whenever code is pushed to the master
-#  * branch or a pull request targets master.  The generated HTML documentation
-#  * is uploaded as a build artifact so reviewers can inspect it without running
-#  * Doxygen locally.
+#  * Activated on manual dispatch (workflow_dispatch) or when a pull request is
+#  * opened against master.  For PR triggers the workflow computes the list of
+#  * changed files and passes them as the documentation scope.  For manual
+#  * triggers the caller may supply an explicit scope or leave it blank to
+#  * default to all public headers and library sources.
 #  *
-#  * Skips execution when the triggering branch matches the automated
-#  * "devin/gha-doxygen-*" pattern to prevent infinite CI loops.
+#  * A loop-prevention guard skips execution when the head branch matches
+#  * the "devin/gha-doxygen-*" pattern so that PRs created by this very
+#  * workflow do not re-trigger it.
 #  *
-#  * @note Requires the Doxygen configuration at documentation/libzbc.doxygen.
+#  * @note Requires the DEVIN_API_KEY repository secret.
 #  */
 
-name: Doxygen Documentation
+name: Add Doxygen Comments via Devin
 
 on:
-  push:
-    branches: [ master ]
+  workflow_dispatch:
+    inputs:
+      scope:
+        description: >
+          Which files/directories to add Doxygen comments to
+          (e.g. "lib/zbc.c", "include/", or leave blank for all public headers and library sources)
+        required: false
+        default: ""
+
   pull_request:
-    branches: [ master ]
+    branches:
+      - master
+    types:
+      - opened
+
+# Branch naming convention for Devin sessions spawned by this action:
+#   devin/gha-doxygen-*
+# When a PR is opened from such a branch, the workflow detects the pattern
+# in the head branch name and skips, preventing an infinite loop.
 
 jobs:
-  generate-docs:
+  trigger-devin:
     # /**
-    #  * @brief Build Doxygen HTML documentation and upload as artifact.
+    #  * @brief Compute the documentation scope and launch a Devin AI session.
     #  *
     #  * Steps:
-    #  *   1. Check out the repository.
-    #  *   2. Install the doxygen and graphviz packages.
-    #  *   3. Run doxygen with the project configuration file.
-    #  *   4. Upload the generated HTML tree as a GitHub Actions artifact.
+    #  *   1. Check whether the PR was authored by a previous Devin doxygen
+    #  *      session (loop guard).
+    #  *   2. Check out the repository with full history to compute the diff.
+    #  *   3. Determine the list of files changed in the PR.
+    #  *   4. POST to the Devin API to create a new documentation session,
+    #  *      passing the computed scope and a detailed prompt.
     #  *
-    #  * @note Skipped when the head ref matches devin/gha-doxygen-* to avoid
-    #  *       infinite workflow loops from automated documentation PRs.
+    #  * @note Skipped when the head branch matches devin/gha-doxygen-* to
+    #  *       prevent infinite workflow loops.
     #  */
-    if: ${{ !startsWith(github.head_ref, 'devin/gha-doxygen-') }}
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Install Doxygen
+      - name: Check for Devin-authored PR and skip if so
+        id: loop-guard
+        env:
+          HEAD_BRANCH: ${{ github.head_ref }}
         run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq doxygen graphviz
+          if echo "$HEAD_BRANCH" | grep -qE '^devin/gha-doxygen-'; then
+            echo "Skipping: this PR was created by a Devin doxygen session."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
 
-      - name: Generate documentation
-        run: doxygen documentation/libzbc.doxygen
-
-      - name: Upload documentation artifact
-        uses: actions/upload-artifact@v4
+      - name: Checkout repo to compute PR diff
+        if: steps.loop-guard.outputs.skip != 'true' && github.event_name == 'pull_request'
+        uses: actions/checkout@v4
         with:
-          name: doxygen-docs
-          path: documentation/html/
-          retention-days: 14
+          fetch-depth: 0
+
+      - name: Get changed files from PR
+        if: steps.loop-guard.outputs.skip != 'true' && github.event_name == 'pull_request'
+        id: changed-files
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          CHANGED=$(git diff --name-only "$BASE_SHA" "$HEAD_SHA" | tr '\n' ', ' | sed 's/,$//')
+          echo "files=$CHANGED" >> "$GITHUB_OUTPUT"
+
+      - name: Kick off Devin session
+        if: steps.loop-guard.outputs.skip != 'true'
+        env:
+          DEVIN_API_KEY: ${{ secrets.DEVIN_API_KEY }}
+          SCOPE: ${{ github.event.inputs.scope }}
+          PR_CHANGED_FILES: ${{ steps.changed-files.outputs.files }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          # For pull_request triggers, scope to the files changed in the PR.
+          # For workflow_dispatch, use the user-provided scope or default to all.
+          if [ "$EVENT_NAME" = "pull_request" ]; then
+            SCOPE_INSTRUCTION="ONLY the files changed in PR #${PR_NUMBER} (${PR_TITLE}): ${PR_CHANGED_FILES}"
+          elif [ -z "$SCOPE" ]; then
+            SCOPE_INSTRUCTION="all public header files under include/libzbc/ and all library source files under lib/"
+          else
+            SCOPE_INSTRUCTION="the following files/directories: $SCOPE"
+          fi
+
+          PROMPT=$(cat <<'ENDOFPROMPT'
+          You are working on the milind-cognition/libzbc repository — a C library for managing Zoned Block Devices (ZBD).
+
+          Your task: Add Doxygen-compatible documentation comments to SCOPE_PLACEHOLDER so that running Doxygen picks them up and produces complete API documentation.
+
+          IMPORTANT: You should ONLY add or update Doxygen comments for the code
+          that was added or changed in the specified files. Do NOT modify other
+          files or add comments across the entire codebase. Focus exclusively on
+          ensuring the new/changed code in those files has proper Doxygen comments.
+
+          Guidelines:
+          1. Use /** ... */ comment blocks (C-style Doxygen comments).
+          2. For every public function, add @brief, @param (for each parameter), and @return tags.
+          3. For every public struct/enum/typedef, add @brief and document each member with /**< ... */ inline comments or @param-style tags.
+          4. For every #define macro, add a @brief and document parameters with @param if it is function-like.
+          5. Preserve existing comments — only add or augment, never remove.
+          6. Match the existing code style (tab indentation, line length conventions).
+          7. The project already has a Doxygen config at documentation/libzbc.doxygen — do NOT modify it.
+          8. IMPORTANT: When creating your PR branch, you MUST name it using the
+             pattern: devin/gha-doxygen-<timestamp>
+             For example: devin/gha-doxygen-1709337600
+             This naming convention is required so that the CI system can identify
+             PRs created by this automated workflow and avoid infinite loops.
+          9. Create a PR with your changes when done.
+
+          The main public header is include/libzbc/zbc.h. The internal library sources are in lib/.
+          ENDOFPROMPT
+          )
+
+          PROMPT="${PROMPT//SCOPE_PLACEHOLDER/$SCOPE_INSTRUCTION}"
+
+          RESPONSE=$(curl -s -w "\n%{http_code}" -X POST "https://api.devin.ai/v1/sessions" \
+            -H "Authorization: Bearer $DEVIN_API_KEY" \
+            -H "Content-Type: application/json" \
+            -d "$(jq -n --arg prompt "$PROMPT" '{prompt: $prompt}')")
+
+          HTTP_CODE=$(echo "$RESPONSE" | tail -1)
+          BODY=$(echo "$RESPONSE" | sed '$d')
+
+          if [ "$HTTP_CODE" -ge 200 ] && [ "$HTTP_CODE" -lt 300 ]; then
+            SESSION_ID=$(echo "$BODY" | jq -r '.session_id // .devin_id // "unknown"')
+            SESSION_URL=$(echo "$BODY" | jq -r '.url // "unknown"')
+            echo "Devin session created successfully!"
+            echo "Session ID: $SESSION_ID"
+            echo "Session URL: $SESSION_URL"
+          else
+            echo "Failed to create Devin session (HTTP $HTTP_CODE)"
+            echo "$BODY"
+            exit 1
+          fi
