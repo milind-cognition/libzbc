@@ -1,3 +1,19 @@
+## @file devin-doxygen-comments.yml
+## @brief GitHub Actions workflow that triggers Devin to add Doxygen comments.
+##
+## This workflow fires on pull_request (opened) and workflow_dispatch events.
+## It computes the set of changed files in a PR, then creates a Devin AI
+## session whose prompt instructs it to add Doxygen-compatible documentation
+## comments to the affected source files.
+##
+## @par Loop Prevention
+## PRs whose head branch matches the pattern @c devin/gha-doxygen-* are
+## detected and skipped to prevent infinite re-triggering.
+##
+## @par Inputs (workflow_dispatch)
+## @param scope  Files or directories to document (blank = all public
+##               headers and library sources).
+
 name: Add Doxygen Comments via Devin
 
 on:
