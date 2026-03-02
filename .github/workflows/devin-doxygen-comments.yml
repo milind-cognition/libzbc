@@ -1,0 +1,57 @@
+# /**
+#  * @file devin-doxygen-comments.yml
+#  * @brief GitHub Actions workflow that generates Doxygen API documentation.
+#  *
+#  * Runs Doxygen against the repository whenever code is pushed to the master
+#  * branch or a pull request targets master.  The generated HTML documentation
+#  * is uploaded as a build artifact so reviewers can inspect it without running
+#  * Doxygen locally.
+#  *
+#  * Skips execution when the triggering branch matches the automated
+#  * "devin/gha-doxygen-*" pattern to prevent infinite CI loops.
+#  *
+#  * @note Requires the Doxygen configuration at documentation/libzbc.doxygen.
+#  */
+
+name: Doxygen Documentation
+
+on:
+  push:
+    branches: [ master ]
+  pull_request:
+    branches: [ master ]
+
+jobs:
+  generate-docs:
+    # /**
+    #  * @brief Build Doxygen HTML documentation and upload as artifact.
+    #  *
+    #  * Steps:
+    #  *   1. Check out the repository.
+    #  *   2. Install the doxygen and graphviz packages.
+    #  *   3. Run doxygen with the project configuration file.
+    #  *   4. Upload the generated HTML tree as a GitHub Actions artifact.
+    #  *
+    #  * @note Skipped when the head ref matches devin/gha-doxygen-* to avoid
+    #  *       infinite workflow loops from automated documentation PRs.
+    #  */
+    if: ${{ !startsWith(github.head_ref, 'devin/gha-doxygen-') }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Doxygen
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq doxygen graphviz
+
+      - name: Generate documentation
+        run: doxygen documentation/libzbc.doxygen
+
+      - name: Upload documentation artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: doxygen-docs
+          path: documentation/html/
+          retention-days: 14
