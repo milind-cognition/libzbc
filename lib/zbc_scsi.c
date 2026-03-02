@@ -894,6 +894,7 @@ static int zbc_scsi_report_realms(struct zbc_device *dev, uint64_t sector,
 				      NULL, bufsz);
 		if (ret != 0) {
 			free(domains);
+			*nr_realms = total_nr;
 			return ret;
 		}
 
