@@ -10,11 +10,33 @@ on:
         required: false
         default: ""
 
+  push:
+    branches:
+      - master
+
+# Branch naming convention for Devin sessions spawned by this action:
+#   devin/gha-doxygen-*
+# When such a branch is merged to master, the workflow detects the pattern
+# in the merge commit message and skips, preventing an infinite loop.
+
 jobs:
   trigger-devin:
     runs-on: ubuntu-latest
     steps:
+      - name: Check for Devin-authored merge and skip if so
+        id: loop-guard
+        env:
+          COMMIT_MSG: ${{ github.event.head_commit.message }}
+        run: |
+          if echo "$COMMIT_MSG" | grep -qiE 'devin/gha-doxygen-'; then
+            echo "Skipping: this push is from a Devin-created doxygen PR."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Kick off Devin session
+        if: steps.loop-guard.outputs.skip != 'true'
         env:
           DEVIN_API_KEY: ${{ secrets.DEVIN_API_KEY }}
           SCOPE: ${{ github.event.inputs.scope }}
@@ -39,7 +61,12 @@ jobs:
           5. Preserve existing comments — only add or augment, never remove.
           6. Match the existing code style (tab indentation, line length conventions).
           7. The project already has a Doxygen config at documentation/libzbc.doxygen — do NOT modify it.
-          8. Create a PR with your changes when done.
+          8. IMPORTANT: When creating your PR branch, you MUST name it using the
+             pattern: devin/gha-doxygen-<timestamp>
+             For example: devin/gha-doxygen-1709337600
+             This naming convention is required so that the CI system can identify
+             PRs created by this automated workflow and avoid infinite loops.
+          9. Create a PR with your changes when done.
 
           The main public header is include/libzbc/zbc.h. The internal library sources are in lib/.
           Focus on making sure every function, struct, enum, typedef, and macro has proper Doxygen comments.
