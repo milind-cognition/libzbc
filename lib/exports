@@ -47,6 +47,8 @@ global:
 	zbc_pwritev;
 	zbc_map_iov;
 	zbc_flush;
+	zbc_get_zone_stats;
+	zbc_zone_utilization;
 
 local:
 	*;

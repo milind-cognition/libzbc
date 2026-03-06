@@ -2330,6 +2330,104 @@ extern int zbc_map_iov(const void *buf, size_t sectors,
 extern int zbc_flush(struct zbc_device *dev);
 
 /**
+ * @brief Zone statistics data structure
+ *
+ * Aggregated statistics about the zones of a device. This structure is
+ * populated by \a zbc_get_zone_stats from an array of zones previously
+ * obtained with \a zbc_report_zones or \a zbc_list_zones. All size
+ * values are expressed in units of 512B sectors.
+ */
+struct zbc_zone_stats {
+
+	/**
+	 * Total number of zones examined.
+	 */
+	unsigned int		zbs_nr_zones;
+
+	/**
+	 * Number of conventional zones.
+	 */
+	unsigned int		zbs_nr_conv;
+
+	/**
+	 * Number of sequential write required zones.
+	 */
+	unsigned int		zbs_nr_seq_req;
+
+	/**
+	 * Number of sequential write preferred zones.
+	 */
+	unsigned int		zbs_nr_seq_pref;
+
+	/**
+	 * Number of zones in the empty condition.
+	 */
+	unsigned int		zbs_nr_empty;
+
+	/**
+	 * Number of zones that are implicitly or explicitly open.
+	 */
+	unsigned int		zbs_nr_open;
+
+	/**
+	 * Number of zones in the closed condition.
+	 */
+	unsigned int		zbs_nr_closed;
+
+	/**
+	 * Number of zones in the full condition.
+	 */
+	unsigned int		zbs_nr_full;
+
+	/**
+	 * Total capacity across all examined zones in 512B sectors.
+	 */
+	uint64_t		zbs_total_sectors;
+
+	/**
+	 * Total number of sectors that have been written across all
+	 * sequential write pointer zones, computed as the sum of
+	 * (write_pointer - zone_start) for each non-empty sequential zone.
+	 */
+	uint64_t		zbs_written_sectors;
+};
+
+/**
+ * @brief Compute aggregated zone statistics
+ * @param[in] zones	Array of zone descriptors
+ * @param[in] nr_zones	Number of entries in \a zones
+ * @param[out] stats	Pointer to a \a zbc_zone_stats structure that will
+ *			be filled with the computed statistics
+ *
+ * Walk the supplied array of zone descriptors and compute aggregated
+ * statistics such as zone counts per type and condition, total capacity,
+ * and total written sectors for sequential zones.
+ *
+ * The caller is responsible for obtaining the zone array via
+ * \a zbc_report_zones or \a zbc_list_zones before calling this function.
+ *
+ * @return 0 on success, or a negative error code if \a zones or
+ * \a stats is NULL.
+ */
+extern int zbc_get_zone_stats(struct zbc_zone *zones,
+			      unsigned int nr_zones,
+			      struct zbc_zone_stats *stats);
+
+/**
+ * @brief Get the utilization ratio of sequential zones
+ * @param[in] stats	Pointer to a populated \a zbc_zone_stats structure
+ *
+ * Compute the ratio of written sectors to total capacity across the
+ * sequential zones that were examined. If no sectors are available the
+ * function returns 0.0.
+ *
+ * @return A value between 0.0 and 1.0 representing the fraction of
+ * total sequential zone capacity that has been written, or 0.0 when
+ * the total capacity is zero.
+ */
+extern double zbc_zone_utilization(const struct zbc_zone_stats *stats);
+
+/**
  * @}
  */
 

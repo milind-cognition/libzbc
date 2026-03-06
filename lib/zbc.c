@@ -1544,3 +1544,70 @@ int zbc_get_zbd_stats(struct zbc_device *dev,
 	return (dev->zbd_drv->zbd_get_stats)(dev, stats);
 }
 
+/**
+ * zbc_get_zone_stats - Compute aggregated zone statistics
+ */
+int zbc_get_zone_stats(struct zbc_zone *zones,
+		       unsigned int nr_zones,
+		       struct zbc_zone_stats *stats)
+{
+	unsigned int i;
+
+	if (!zones || !stats)
+		return -EINVAL;
+
+	memset(stats, 0, sizeof(*stats));
+	stats->zbs_nr_zones = nr_zones;
+
+	for (i = 0; i < nr_zones; i++) {
+		struct zbc_zone *z = &zones[i];
+
+		/* Accumulate total capacity */
+		stats->zbs_total_sectors += zbc_zone_length(z);
+
+		/* Count zones by type */
+		if (zbc_zone_conventional(z))
+			stats->zbs_nr_conv++;
+		else if (zbc_zone_sequential_req(z))
+			stats->zbs_nr_seq_req++;
+		else if (zbc_zone_sequential_pref(z))
+			stats->zbs_nr_seq_pref++;
+
+		/* Count zones by condition */
+		if (zbc_zone_empty(z))
+			stats->zbs_nr_empty++;
+		else if (zbc_zone_is_open(z))
+			stats->zbs_nr_open++;
+		else if (zbc_zone_closed(z))
+			stats->zbs_nr_closed++;
+		else if (zbc_zone_full(z))
+			stats->zbs_nr_full++;
+
+		/*
+		 * For sequential zones that are not empty, compute
+		 * written sectors as (write_pointer - zone_start).
+		 */
+		if (zbc_zone_sequential(z) && !zbc_zone_empty(z)) {
+			uint64_t wp = zbc_zone_wp(z);
+			uint64_t start = zbc_zone_start(z);
+
+			if (wp > start)
+				stats->zbs_written_sectors += wp - start;
+		}
+	}
+
+	return 0;
+}
+
+/**
+ * zbc_zone_utilization - Get the utilization ratio of sequential zones
+ */
+double zbc_zone_utilization(const struct zbc_zone_stats *stats)
+{
+	if (!stats || stats->zbs_total_sectors == 0)
+		return 0.0;
+
+	return (double)stats->zbs_written_sectors /
+	       (double)stats->zbs_total_sectors;
+}
+
