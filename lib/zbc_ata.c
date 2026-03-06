@@ -894,8 +894,17 @@ static int zbc_ata_report_realms(struct zbc_device *dev, uint64_t sector,
 				realms->zbr_type = domains[realms->zbr_dom_id].zbm_type;
 			realms->zbr_nr_domains = nr_domains;
 			ptr = buf + ZBC_RPT_REALMS_DESC_OFFSET;
-			/* FIXME don't use nr_domains, use desc_len to limit iteration */
-			for (j = 0; j < nr_domains; j++) {
+			int safe_bound = zbc_realm_safe_nr_entries(
+						desc_len,
+						ZBC_RPT_REALMS_DESC_OFFSET,
+						ZBC_RPT_REALMS_SE_DESC_SIZE,
+						nr_domains);
+			if (safe_bound < nr_domains)
+				zbc_warning("%s: Realm %u descriptor too short"
+					    " (desc_len=%u, nr_domains=%d)\n",
+					    dev->zbd_filename, i, desc_len,
+					    nr_domains);
+			for (j = 0; j < safe_bound; j++) {
 				ri = &realms->zbr_ri[j];
 				ri->zbi_end_sector =
 						zbc_dev_lba2sect(dev, zbc_ata_get_qword(ptr + 8));
