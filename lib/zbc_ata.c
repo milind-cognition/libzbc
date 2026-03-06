@@ -924,6 +924,9 @@ static int zbc_ata_report_realms(struct zbc_device *dev, uint64_t sector,
 
 oldrealms:
 		desc_len = ZBC_RPT_REALMS_RECORD_SIZE;
+		bufsz = (cmd.bufsz - ZBC_RPT_REALMS_HEADER_SIZE) / desc_len;
+		if (nr > bufsz)
+			nr = bufsz;
 	} else {
 		desc_len = ZBC_RPT_REALMS_RECORD_SIZE;
 		bufsz = (cmd.bufsz - ZBC_RPT_REALMS_HEADER_SIZE) / desc_len;
