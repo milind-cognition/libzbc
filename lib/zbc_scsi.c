@@ -859,6 +859,13 @@ static int zbc_scsi_report_realms(struct zbc_device *dev, uint64_t sector,
 
 	if (!zbc_dev_is_zoned(dev))
 		return -ENXIO;
+
+	if (!(dev->zbd_info.zbd_flags & ZBC_STANDARD_RPT_REALMS)) {
+		zbc_error("%s: Standard REPORT REALMS layout not supported by device",
+			  dev->zbd_filename);
+		return -ENXIO;
+	}
+
 	/*
 	 * Always get zone domains first. Allocate the buffer for
 	 * ZBC_NR_ZONE_TYPES domains since we will be only able to
@@ -947,13 +954,6 @@ static int zbc_scsi_report_realms(struct zbc_device *dev, uint64_t sector,
 	/* Get the number of realm descriptors to fill */
 	if (nr > *nr_realms)
 		nr = *nr_realms;
-
-	if (!(dev->zbd_info.zbd_flags & ZBC_STANDARD_RPT_REALMS)) {
-		zbc_error("%s: REPORT REALMS is not supported by device",
-			  dev->zbd_filename);
-		ret = -ENXIO;
-		goto out;
-	}
 
 	desc_len = zbc_sg_get_int32(&buf[8]);
 	next = zbc_sg_get_int64(&buf[12]);
