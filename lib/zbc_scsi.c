@@ -841,7 +841,24 @@ out:
 }
 
 /**
- * Report device zone realm configuration.
+ * @brief Report device zone realm configuration.
+ *
+ * Issue a SCSI REPORT REALMS command and fill the caller-supplied array
+ * with zone realm descriptors.  The device must be zoned and must
+ * advertise the standard ZAC-2 REPORT REALMS layout
+ * (ZBC_STANDARD_RPT_REALMS flag); otherwise -ENXIO is returned before
+ * any I/O is performed.
+ *
+ * @param[in]     dev        Device handle.
+ * @param[in]     sector     Start sector for the realm report.
+ * @param[in]     ro         Reporting options filter.
+ * @param[out]    realms     Caller-allocated array to receive realm
+ *                           descriptors, or NULL to query the count only.
+ * @param[in,out] nr_realms  On entry the maximum number of descriptors
+ *                           the caller can accept; on successful return
+ *                           the actual number filled.
+ *
+ * @return 0 on success, or a negative errno value on failure.
  */
 static int zbc_scsi_report_realms(struct zbc_device *dev, uint64_t sector,
 				  enum zbc_realm_report_options ro,
