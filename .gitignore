@@ -112,3 +112,9 @@ libzbc.pc
 .libs
 .dirstamp
 
+
+# Unit tests
+test-suite.log
+test/unit/*.log
+test/unit/*.trs
+test/unit/zbc_test_wp_check

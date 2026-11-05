@@ -642,6 +642,43 @@ void zbc_print_device_info(struct zbc_device_info *info, FILE *out)
 }
 
 /**
+ * @brief Check a zone write pointer reported by the device
+ * @param[in] dev	Device handle (used for error messages)
+ * @param[in] zone	Zone descriptor parsed from a REPORT ZONES reply
+ * @param[in] idx	Index of the zone in the REPORT ZONES reply
+ *
+ * The write pointer of FULL, READ ONLY, OFFLINE, INACTIVE and NOT WP zones
+ * is invalid per ZBC/ZAC and is not checked.
+ *
+ * @return 0 if the write pointer is valid or not applicable, -EIO otherwise.
+ */
+int zbc_zone_check_wp(struct zbc_device *dev, struct zbc_zone *zone,
+		      unsigned int idx)
+{
+	if (!zbc_zone_sequential(zone) && !zbc_zone_sobr(zone))
+		return 0;
+
+	if (zbc_zone_full(zone) ||
+	    zbc_zone_rdonly(zone) ||
+	    zbc_zone_offline(zone) ||
+	    zbc_zone_inactive(zone) ||
+	    zbc_zone_not_wp(zone))
+		return 0;
+
+	if (zone->zbz_write_pointer >= zone->zbz_start &&
+	    zone->zbz_write_pointer - zone->zbz_start <= zone->zbz_length)
+		return 0;
+
+	zbc_error("%s: Zone %u (start %llu, length %llu, condition 0x%x): "
+		  "write pointer %llu is out of zone bounds\n",
+		  dev->zbd_filename, idx,
+		  zbc_zone_start(zone), zbc_zone_length(zone),
+		  zbc_zone_condition(zone), zbc_zone_wp(zone));
+
+	return -EIO;
+}
+
+/**
  * zbc_report_zones - Get zone information
  */
 int zbc_report_zones(struct zbc_device *dev, uint64_t sector,

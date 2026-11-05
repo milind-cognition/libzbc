@@ -360,6 +360,20 @@ extern int zbc_log_level;
 				  # cond);			\
 	} while (0)
 
+/**
+ * @brief Check a zone write pointer reported by the device
+ * @param[in] dev	Device handle (used for error messages)
+ * @param[in] zone	Zone descriptor parsed from a REPORT ZONES reply
+ * @param[in] idx	Index of the zone in the REPORT ZONES reply
+ *
+ * For sequential and SOBR zones in a condition where the write pointer is
+ * valid, check that zbz_start <= zbz_write_pointer <= zbz_start + zbz_length.
+ *
+ * @return 0 if the write pointer is valid or not applicable, -EIO otherwise.
+ */
+int zbc_zone_check_wp(struct zbc_device *dev, struct zbc_zone *zone,
+		      unsigned int idx);
+
 #endif
 
 /* __LIBZBC_INTERNAL_H__ */
