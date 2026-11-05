@@ -112,3 +112,7 @@ libzbc.pc
 .libs
 .dirstamp
 
+
+test/unit/zbc_test_wp_check
+test/unit/*.log
+test/unit/*.trs
