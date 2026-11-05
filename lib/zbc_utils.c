@@ -8,6 +8,10 @@
  * Author: Damien Le Moal (damien.lemoal@wdc.com)
  */
 #define _GNU_SOURCE
+/**
+ * @file zbc_utils.c
+ * @brief Internal libzbc utility functions (sysfs helpers, zone write pointer validation).
+ */
 #include <stdio.h>
 #include <stdlib.h>
 #include <libgen.h>

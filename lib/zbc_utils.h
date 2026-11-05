@@ -7,6 +7,10 @@
  *
  * Author: Damien Le Moal (damien.lemoal@wdc.com)
  */
+/**
+ * @file zbc_utils.h
+ * @brief Internal libzbc utility function declarations.
+ */
 #ifndef __LIBZBC_UTILS_H__
 #define __LIBZBC_UTILS_H__
 
@@ -50,6 +54,13 @@ struct zbc_zone;
 
 /**
  * Check that a reported zone write pointer lies within the zone.
+ *
+ * @brief Validate the write pointer of a zone parsed from REPORT ZONES.
+ *
+ * Only sequential and SOBR zones with a valid write pointer are checked.
+ * A write pointer equal to the zone end (zbz_start + zbz_length) is valid.
+ * Parameters and return value are documented with the definition in
+ * zbc_utils.c.
  */
 int zbc_zone_check_wp(struct zbc_device *dev, unsigned int idx,
 		      struct zbc_zone *zone);
