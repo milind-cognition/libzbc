@@ -373,6 +373,24 @@ extern int zbc_log_level;
  *
  * Return 0 if the write pointer is valid or not applicable, and -EIO
  * otherwise.
+ *
+ * @brief Validate the write pointer of a zone parsed from REPORT ZONES.
+ *
+ * Called by the SCSI and ATA REPORT ZONES parsers on every zone descriptor
+ * so that a write pointer outside of its zone is rejected instead of being
+ * returned to the caller. A write pointer equal to the zone end
+ * (zbz_start + zbz_length) is valid. The comparison is written so that it
+ * cannot overflow, even for a write pointer of UINT64_MAX. An error message
+ * is logged with zbc_error() when the check fails.
+ *
+ * @param[in] dev	Device that reported the zone (used for logging)
+ * @param[in] idx	Index of the zone descriptor in the REPORT ZONES reply
+ * @param[in] zone	Zone parsed from the zone descriptor, with start,
+ *			length and write pointer in 512B sector units
+ *
+ * @return 0 if the write pointer is within the zone bounds or if the check
+ * does not apply to the zone type or condition, and -EIO if the write
+ * pointer is out of the zone bounds.
  */
 static inline int zbc_zone_check_wp(struct zbc_device *dev, unsigned int idx,
 				    struct zbc_zone *zone)

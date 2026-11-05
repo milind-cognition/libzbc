@@ -8,25 +8,51 @@
  * Host-runnable check of zbc_zone_check_wp() using synthetic zone
  * descriptors. No zoned device is needed.
  */
+/**
+ * @file zbc_test_wp_check.c
+ * @brief Unit test for the REPORT ZONES write pointer bounds check.
+ *
+ * Runs zbc_zone_check_wp() against a table of synthetic zones built from
+ * the geometry of zone 1873 in FWVAL-4471 and compares each result with
+ * the expected value. Built as a \c make \c check program in test/unit.
+ */
 #include <unistd.h>
 
 #include "zbc.h"
 
+/**
+ * @brief Library log level, defined here as the test does not link libzbc.
+ *
+ * Set to ZBC_LOG_ERROR so that the rejected cases print the error message
+ * of zbc_zone_check_wp().
+ */
 int zbc_log_level = ZBC_LOG_ERROR;
 
 /* Zone 1873 geometry from FWVAL-4471 */
+/** @brief Start sector of the test zone (zone 1873 in FWVAL-4471). */
 #define ZSTART	0x3A880000ULL
+/** @brief Length in 512B sectors of the test zone. */
 #define ZLEN	0x80000ULL
+/** @brief End sector of the test zone (first sector after the zone). */
 #define ZEND	(ZSTART + ZLEN)
 
+/**
+ * @brief One write pointer check test case.
+ */
 struct wp_case {
-	const char	*name;
-	uint8_t		type;
-	uint8_t		cond;
-	uint64_t	wp;
-	int		expected;
+	const char	*name;		/**< Test case description */
+	uint8_t		type;		/**< Zone type (enum zbc_zone_type) */
+	uint8_t		cond;		/**< Zone condition
+					     (enum zbc_zone_condition) */
+	uint64_t	wp;		/**< Write pointer (512B sector) */
+	int		expected;	/**< Expected result of
+					     zbc_zone_check_wp() */
 };
 
+/**
+ * @brief Test cases: write pointers that must be accepted, rejected with
+ * -EIO, or skipped because of the zone type or condition.
+ */
 static const struct wp_case cases[] = {
 	{ "SWR wp at zone start",	ZBC_ZT_SEQUENTIAL_REQ, ZBC_ZC_EMPTY,
 	  ZSTART, 0 },
@@ -60,6 +86,15 @@ static const struct wp_case cases[] = {
 	  (uint64_t)-1, 0 },
 };
 
+/**
+ * @brief Run all test cases against zbc_zone_check_wp().
+ *
+ * Each case is applied to a zone with start ZSTART and length ZLEN on a
+ * zeroed synthetic device. A line is printed for each case, followed by
+ * a summary.
+ *
+ * @return 0 if all cases give the expected result, 1 otherwise.
+ */
 int main(void)
 {
 	struct zbc_device dev;
