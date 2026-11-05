@@ -571,6 +571,12 @@ static int zbc_scsi_do_report_zones(struct zbc_device *dev, uint64_t sector,
 		else
 			zones[i].zbz_write_pointer = (uint64_t)-1;
 
+		ret = zbc_zone_check_wp(dev, &zones[i], i);
+		if (ret) {
+			nz = i;
+			goto out;
+		}
+
 		buf += ZBC_ZONE_DESCRIPTOR_LENGTH;
 
 	}

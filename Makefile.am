@@ -11,6 +11,14 @@ if BUILD_TEST
 SUBDIRS += test/programs
 endif
 
+check_PROGRAMS = test/unit/zbc_test_wp_check
+test_unit_zbc_test_wp_check_SOURCES = test/unit/zbc_test_wp_check.c
+test_unit_zbc_test_wp_check_CFLAGS = -Wall -Wextra -Wno-unused-parameter \
+	-I$(top_srcdir)/include -I$(top_srcdir)/lib
+test_unit_zbc_test_wp_check_LDADD = lib/libzbc.la
+test_unit_zbc_test_wp_check_LDFLAGS = -static
+TESTS = $(check_PROGRAMS)
+
 EXTRA_DIST = autogen.sh \
 	     README.md \
 	     LICENSES/BSD-2-Clause.txt \
