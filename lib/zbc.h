@@ -375,6 +375,8 @@ extern int zbc_log_level;
  * device is invalid for these conditions.
  *
  * @return 0 if the write pointer is valid or not checked, -EIO otherwise.
+ * @retval 0	Write pointer valid, or zone type/condition not checked
+ * @retval -EIO	Write pointer below zone start or above zone end
  */
 static inline int zbc_zone_check_wp(const char *filename, unsigned int idx,
 				    const struct zbc_zone *zone)
