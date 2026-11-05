@@ -118,6 +118,33 @@ static void zbc_report_print_zone(struct zbc_device_info *info,
 	       length);
 }
 
+static void zbc_report_print_csv_header(void)
+{
+	printf("zone,type,cond,start,len,wp\n");
+}
+
+static void zbc_report_print_zone_csv(struct zbc_device_info *info,
+				      struct zbc_zone *z, int zno,
+				      bool lba_unit)
+{
+	bool has_wp;
+
+	if (zbc_zone_sobr(z))
+		has_wp = zbc_zone_condition(z) == ZBC_ZC_IMP_OPEN ||
+			 zbc_zone_condition(z) == ZBC_ZC_EMPTY;
+	else
+		has_wp = zbc_zone_sequential(z) && !zbc_zone_inactive(z);
+
+	printf("%d,%s,%s,%llu,%llu,",
+	       zno,
+	       zbc_zone_type_str(zbc_zone_type(z)),
+	       zbc_zone_condition_str(zbc_zone_condition(z)),
+	       zbc_report_val(info, zbc_zone_start(z), lba_unit),
+	       zbc_report_val(info, zbc_zone_length(z), lba_unit));
+	if (has_wp)
+		printf("%llu", zbc_report_val(info, zbc_zone_wp(z), lba_unit));
+	printf("\n");
+}
 
 static int zbc_report_zones_usage(FILE *out, char *prog)
 {
@@ -129,6 +156,8 @@ static int zbc_report_zones_usage(FILE *out, char *prog)
 		"  -scsi         : Force the use of SCSI passthrough commands\n"
 		"  -ata          : Force the use of ATA passthrough commands\n"
 		"  -lba          : Use LBA size unit (default is 512B sectors)\n"
+		"  -csv          : Print zones as CSV (zone,type,cond,start,len,wp)\n"
+		"                  without the device information header\n"
 		"  -start <ofst> : Start offset of the report. if -lba is\n"
 		"                  specified, <ofst> is interpreted as an LBA\n"
 		"                  value. Otherwise, it is interpreted as a\n"
@@ -163,6 +192,7 @@ int main(int argc, char **argv)
 	unsigned int nr_zones = 0, nz = 0;
 	struct zbc_zone *z, *zones = NULL;
 	bool lba_unit = false;
+	bool csv = false;
 	unsigned long long start = 0;
 	int i, ret = 1, oflags = 0;
 	int num = 0;
@@ -210,6 +240,10 @@ int main(int argc, char **argv)
 		} else if (strcmp(argv[i], "-lba") == 0) {
 
 			lba_unit = true;
+
+		} else if (strcmp(argv[i], "-csv") == 0) {
+
+			csv = true;
 
 		} else if (strcmp(argv[i], "-start") == 0) {
 
@@ -305,8 +339,10 @@ int main(int argc, char **argv)
 
 	zbc_get_device_info(dev, &info);
 
-	printf("Device %s:\n", path);
-	zbc_print_device_info(&info, stdout);
+	if (!csv) {
+		printf("Device %s:\n", path);
+		zbc_print_device_info(&info, stdout);
+	}
 
 	/* Get the number of zones */
 	if (lba_unit)
@@ -322,10 +358,18 @@ int main(int argc, char **argv)
 	}
 
 	/* Print zone info */
-	printf("    %u zone%s from %llu, reporting option 0x%02x\n",
-	       nr_zones,
-	       (nr_zones > 1) ? "s" : "",
-	       start, ro);
+	if (csv) {
+		if (num) {
+			printf("nr_zones\n%u\n", nr_zones);
+			goto out;
+		}
+		zbc_report_print_csv_header();
+	} else {
+		printf("    %u zone%s from %llu, reporting option 0x%02x\n",
+		       nr_zones,
+		       (nr_zones > 1) ? "s" : "",
+		       start, ro);
+	}
 
 	if (num)
 		goto out;
@@ -351,7 +395,8 @@ int main(int argc, char **argv)
 		goto out;
 	}
 
-	printf("%u / %u zone%s:\n", nz, nr_zones, (nz > 1) ? "s" : "");
+	if (!csv)
+		printf("%u / %u zone%s:\n", nz, nr_zones, (nz > 1) ? "s" : "");
 	if (lba_unit)
 		sector = zbc_lba2sect(&info, start);
 	else
@@ -363,26 +408,31 @@ int main(int argc, char **argv)
 		if (ro == ZBC_RZ_RO_ALL) {
 			/* Check */
 			if (zbc_zone_start(z) != sector) {
-				printf("[WARNING] Zone %05d: sector %llu "
-				       "should be %llu\n",
-				       i, zbc_zone_start(z), sector);
+				fprintf(csv ? stderr : stdout,
+					"[WARNING] Zone %05d: sector %llu "
+					"should be %llu\n",
+					i, zbc_zone_start(z), sector);
 				sector = zbc_zone_start(z);
 			}
 			nr_sectors += zbc_zone_length(z);
 			sector += zbc_zone_length(z);
 		}
 
-		zbc_report_print_zone(&info, z, i, lba_unit);
+		if (csv)
+			zbc_report_print_zone_csv(&info, z, i, lba_unit);
+		else
+			zbc_report_print_zone(&info, z, i, lba_unit);
 
 	}
 
 	if (start == 0 && ro == ZBC_RZ_RO_ALL && nz == nr_zones) {
 		/* Check */
 		if ( zbc_sect2lba(&info, nr_sectors) != info.zbd_lblocks ) {
-			printf("[WARNING] %llu logical blocks reported "
-			       "but capacity is %llu logical blocks\n",
-			       zbc_sect2lba(&info, nr_sectors),
-			       (unsigned long long)info.zbd_lblocks);
+			fprintf(csv ? stderr : stdout,
+				"[WARNING] %llu logical blocks reported "
+				"but capacity is %llu logical blocks\n",
+				zbc_sect2lba(&info, nr_sectors),
+				(unsigned long long)info.zbd_lblocks);
 		}
 	}
 
