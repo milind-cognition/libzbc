@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: BSD-2-Clause
 // SPDX-License-Identifier: LGPL-3.0-or-later
-/*
+/**
+ * @file zbc_test_wp_check.c
+ * @brief Unit test for the REPORT ZONES write pointer bounds check.
+ *
  * This file is part of libzbc.
  *
  * Copyright (c) 2020 Western Digital Corporation or its affiliates.
@@ -11,20 +14,37 @@
  */
 #include "zbc.h"
 
+/**
+ * @brief Library log level, defined here as the test does not link libzbc.
+ */
 int zbc_log_level = ZBC_LOG_ERROR;
 
 /* Zone 1873 from FWVAL-4471: start 0x3A880000, length 0x80000 sectors */
+
+/**
+ * @brief Start sector (512B units) of the test zone.
+ */
 #define TZ_START	0x3A880000ULL
+
+/**
+ * @brief Length in sectors (512B units) of the test zone.
+ */
 #define TZ_LEN		0x80000ULL
 
+/**
+ * @brief Write pointer check test case.
+ */
 struct wp_test {
-	const char		*name;
-	enum zbc_zone_type	type;
-	enum zbc_zone_condition	cond;
-	uint64_t		wp;
-	int			expected;
+	const char		*name;		/**< Test case description */
+	enum zbc_zone_type	type;		/**< Zone type */
+	enum zbc_zone_condition	cond;		/**< Zone condition */
+	uint64_t		wp;		/**< Zone write pointer (512B sectors) */
+	int			expected;	/**< Expected zbc_zone_check_wp() return */
 };
 
+/**
+ * @brief Test cases, all using the TZ_START / TZ_LEN zone geometry.
+ */
 static struct wp_test tests[] = {
 	{ "SWR empty, wp == start",
 	  ZBC_ZT_SEQUENTIAL_REQ, ZBC_ZC_EMPTY, TZ_START, 0 },
@@ -60,6 +80,11 @@ static struct wp_test tests[] = {
 	  ZBC_ZT_CONVENTIONAL, ZBC_ZC_NOT_WP, (uint64_t)-1, 0 },
 };
 
+/**
+ * @brief Run all write pointer check test cases.
+ *
+ * @return 0 if all test cases pass, 1 otherwise.
+ */
 int main(void)
 {
 	unsigned int i, nr_tests = sizeof(tests) / sizeof(tests[0]);

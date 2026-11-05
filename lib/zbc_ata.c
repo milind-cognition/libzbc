@@ -1716,7 +1716,23 @@ static int zbc_ata_flush(struct zbc_device *dev)
 }
 
 /**
- * Get device zone information.
+ * @brief Get device zone information.
+ *
+ * @param[in] dev	Device handle
+ * @param[in] sector	512B sector from which to start reporting zones
+ * @param[in] ro	Zone reporting options (zone condition filter)
+ * @param[out] max_lba	Maximum LBA of the device (may be NULL)
+ * @param[out] zones	Array of zones to fill (may be NULL to only count)
+ * @param[in,out] nr_zones	Number of entries in @p zones on input,
+ *				number of valid zones reported on output
+ * @param[in] bufsz	Size of the REPORT ZONES data buffer in bytes
+ *
+ * Each zone descriptor is validated with zbc_zone_check_wp(). If a zone
+ * write pointer is out of the zone boundaries, @p nr_zones is set to the
+ * number of valid zones preceding the faulty zone and -EIO is returned.
+ *
+ * @return 0 on success, -EIO if a zone write pointer is out of the zone
+ *	   boundaries, or another negative error code on failure.
  */
 static int zbc_ata_do_report_zones(struct zbc_device *dev, uint64_t sector,
 			enum zbc_zone_reporting_options ro, uint64_t *max_lba,
