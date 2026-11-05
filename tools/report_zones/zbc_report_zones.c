@@ -118,7 +118,7 @@ static void zbc_report_print_zone(struct zbc_device_info *info,
 	       length);
 }
 
-static bool zbc_report_zone_has_wp(struct zbc_zone *z)
+static bool zbc_report_zone_has_wp(const struct zbc_zone *z)
 {
 	if (zbc_zone_sobr(z))
 		return zbc_zone_condition(z) == ZBC_ZC_IMP_OPEN ||
