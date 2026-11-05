@@ -113,3 +113,5 @@ libzbc.pc
 .libs
 .dirstamp
 
+test/unit/*.log
+test/unit/*.trs
