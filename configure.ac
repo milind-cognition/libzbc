@@ -102,6 +102,7 @@ AC_CONFIG_FILES([
 	lib/libzbc.pc
 	tools/Makefile
 	test/programs/Makefile
+	test/unit/Makefile
 ])
 
 AC_OUTPUT

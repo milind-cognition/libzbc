@@ -46,6 +46,7 @@ tools/zbc_zone_activate
 tools/zbc_dev_control
 tools/gzbc
 tools/gzviewer
+test/unit/zbc_test_wp_check
 
 # Generated files
 *.desktop

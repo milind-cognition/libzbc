@@ -10,6 +10,7 @@
  */
 #include "zbc.h"
 #include "zbc_sg.h"
+#include "zbc_utils.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -1841,6 +1842,12 @@ static int zbc_ata_do_report_zones(struct zbc_device *dev, uint64_t sector,
 						 zbc_ata_get_qword(&buf[24]));
 		else
 			zones[i].zbz_write_pointer = (uint64_t)-1;
+
+		ret = zbc_zone_check_wp(dev, &zones[i], i);
+		if (ret) {
+			nz = i;
+			goto out;
+		}
 
 		buf += ZBC_ZONE_DESCRIPTOR_LENGTH;
 	}
