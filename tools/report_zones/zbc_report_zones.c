@@ -118,6 +118,18 @@ static void zbc_report_print_zone(struct zbc_device_info *info,
 	       length);
 }
 
+/**
+ * @brief Test if a zone write pointer value is reported
+ * @param[in] z	Zone to test
+ *
+ * Mirror the write pointer reporting rules of zbc_report_print_zone():
+ * a write pointer is reported for sequential zones that are not inactive,
+ * and for SOBR zones only when the zone is empty or implicitly open.
+ * Conventional and gap zones have no write pointer.
+ *
+ * @return true if the zone write pointer is valid and must be reported,
+ * false otherwise.
+ */
 static bool zbc_report_zone_has_wp(const struct zbc_zone *z)
 {
 	if (zbc_zone_sobr(z))
@@ -127,6 +139,19 @@ static bool zbc_report_zone_has_wp(const struct zbc_zone *z)
 	return zbc_zone_sequential(z) && !zbc_zone_inactive(z);
 }
 
+/**
+ * @brief Print a zone information as a CSV line
+ * @param[in] info	Device information, used for sector to LBA conversion
+ * @param[in] z		Zone to print
+ * @param[in] zno	Index of the zone in the zone report
+ * @param[in] lba_unit	If true, print the zone start, length and write
+ *			pointer in logical blocks. Otherwise, use 512B sectors.
+ *
+ * Print one line to stdout matching the CSV header
+ * "zone,type,cond,start,len,wp". The zone type and condition are printed
+ * as hexadecimal codes. The wp field is left empty if the zone has no
+ * valid write pointer (see zbc_report_zone_has_wp()).
+ */
 static void zbc_report_print_zone_csv(struct zbc_device_info *info,
 				      struct zbc_zone *z, int zno,
 				      bool lba_unit)
