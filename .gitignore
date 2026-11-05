@@ -64,6 +64,9 @@ test/programs/zbc_test_report_realms
 test/programs/zbc_test_zone_activate
 test/programs/zbc_test_dev_control
 test/log
+test/unit/zbc_test_wp_check
+test/unit/*.log
+test/unit/*.trs
 
 # Kernel compile files
 *.symvers
