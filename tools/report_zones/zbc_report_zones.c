@@ -9,6 +9,12 @@
  * Author: Damien Le Moal (damien.lemoal@wdc.com)
  *         Christophe Louargant (christophe.louargant@wdc.com)
  */
+
+/**
+ * @file zbc_report_zones.c
+ * @brief zbc_report_zones command line tool: print the zone information
+ *        of a zoned block device, as human readable text or as CSV.
+ */
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdbool.h>
@@ -118,11 +124,35 @@ static void zbc_report_print_zone(struct zbc_device_info *info,
 	       length);
 }
 
+/**
+ * @brief Print the CSV header row used with the -csv option.
+ *
+ * Prints the column names "zone,type,cond,start,len,wp" on a single line
+ * to stdout. Each zone row printed by zbc_report_print_zone_csv() follows
+ * this column order.
+ */
 static void zbc_report_print_csv_header(void)
 {
 	printf("zone,type,cond,start,len,wp\n");
 }
 
+/**
+ * @brief Print the information of a zone as a single CSV row.
+ * @param[in] info	Device information, used to convert sector values to
+ *			LBAs if @p lba_unit is true
+ * @param[in] z		Zone to print
+ * @param[in] zno	Zone number printed in the "zone" column
+ * @param[in] lba_unit	If true, print the start, length and write pointer
+ *			values in logical blocks, otherwise in 512B sectors
+ *
+ * Prints a "zone,type,cond,start,len,wp" row to stdout. The type and
+ * condition columns use the names returned by zbc_zone_type_str() and
+ * zbc_zone_condition_str(). The wp column is left empty for zones that
+ * have no valid write pointer: conventional, gap and inactive zones, and
+ * sequential-or-before-required zones that are neither empty nor
+ * implicitly open. This matches the zones for which
+ * zbc_report_print_zone() prints a write pointer value.
+ */
 static void zbc_report_print_zone_csv(struct zbc_device_info *info,
 				      struct zbc_zone *z, int zno,
 				      bool lba_unit)
@@ -146,6 +176,16 @@ static void zbc_report_print_zone_csv(struct zbc_device_info *info,
 	printf("\n");
 }
 
+/**
+ * @brief Print the usage message of zbc_report_zones.
+ * @param[in] out	Stream to print the usage message to
+ *			(stdout for -h, stderr on invalid arguments)
+ * @param[in] prog	Program name (argv[0]), printed without its directory
+ *
+ * The usage message lists all supported options, including -csv.
+ *
+ * @return Always 1.
+ */
 static int zbc_report_zones_usage(FILE *out, char *prog)
 {
 	fprintf(out,
@@ -183,6 +223,23 @@ static int zbc_report_zones_usage(FILE *out, char *prog)
 	return 1;
 }
 
+/**
+ * @brief zbc_report_zones entry point.
+ * @param[in] argc	Number of command line arguments
+ * @param[in] argv	Command line arguments: options followed by the
+ *			device path
+ *
+ * Opens the device, reports its zones and prints them. By default, the
+ * device information, the number of zones and one line per zone are
+ * printed. With -csv, the device information and zone count summary are
+ * omitted, a header row is printed by zbc_report_print_csv_header() followed
+ * by one row per zone printed by zbc_report_print_zone_csv(), and
+ * "[WARNING]" messages are sent to stderr instead of stdout so that the CSV
+ * output on stdout stays parsable. With -csv and -n, only a "nr_zones"
+ * header line and the number of zones are printed.
+ *
+ * @return 0 on success, 1 on failure or if the usage message is printed.
+ */
 int main(int argc, char **argv)
 {
 	struct zbc_device_info info;
