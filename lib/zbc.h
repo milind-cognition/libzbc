@@ -16,6 +16,7 @@
 #include "libzbc/zbc.h"
 #include "zbc_private.h"
 
+#include <errno.h>
 #include <inttypes.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -359,6 +360,44 @@ extern int zbc_log_level;
 			zbc_panic("Condition %s failed\n",	\
 				  # cond);			\
 	} while (0)
+
+/**
+ * zbc_zone_check_wp - Validate a zone write pointer reported by the device
+ * @dev: Device that reported the zone (used for logging)
+ * @idx: Index of the zone descriptor in the REPORT ZONES reply
+ * @zone: Zone parsed from the zone descriptor
+ *
+ * For sequential and SOBR zones with a condition for which the write
+ * pointer is valid (i.e. not FULL, READ ONLY, OFFLINE, INACTIVE or NOT WP),
+ * check that zbz_start <= zbz_write_pointer <= zbz_start + zbz_length.
+ *
+ * Return 0 if the write pointer is valid or not applicable, and -EIO
+ * otherwise.
+ */
+static inline int zbc_zone_check_wp(struct zbc_device *dev, unsigned int idx,
+				    struct zbc_zone *zone)
+{
+	if (!zbc_zone_sequential(zone) && !zbc_zone_sobr(zone))
+		return 0;
+
+	if (zbc_zone_full(zone) || zbc_zone_rdonly(zone) ||
+	    zbc_zone_offline(zone) || zbc_zone_inactive(zone) ||
+	    zbc_zone_not_wp(zone))
+		return 0;
+
+	/* Overflow safe form of wp > start + length */
+	if (zone->zbz_write_pointer < zone->zbz_start ||
+	    zone->zbz_write_pointer - zone->zbz_start > zone->zbz_length) {
+		zbc_error("%s: Zone %u (start %llu, length %llu): "
+			  "write pointer %llu out of zone bounds\n",
+			  dev->zbd_filename, idx,
+			  zbc_zone_start(zone), zbc_zone_length(zone),
+			  zbc_zone_wp(zone));
+		return -EIO;
+	}
+
+	return 0;
+}
 
 #endif
 
