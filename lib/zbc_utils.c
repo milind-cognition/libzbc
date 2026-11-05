@@ -180,6 +180,20 @@ int zbc_get_sysfs_device_str(char *dev_name, const char *attr,
  * the zone write pointer lies within [zone start, zone start + zone length].
  *
  * @return 0 if the write pointer is valid or not checked, -EIO otherwise.
+ *
+ * @brief Check a zone write pointer against the zone bounds.
+ *
+ * Zones that are not sequential write required, sequential write preferred
+ * or sequential or before required, and zones whose condition makes the
+ * write pointer invalid, are not checked. A write pointer equal to the zone
+ * end (zone start + zone length) is accepted. The bound check is written to
+ * be safe against overflow of zone start + zone length.
+ *
+ * @param[in] dev	Device the zone descriptor was reported by (used for
+ *			the error message)
+ * @param[in] zone	Zone descriptor to check
+ * @param[in] idx	Index of the zone descriptor in the REPORT ZONES reply
+ *			(not the device-wide zone number)
  */
 int zbc_zone_check_wp(struct zbc_device *dev, struct zbc_zone *zone,
 		      unsigned int idx)

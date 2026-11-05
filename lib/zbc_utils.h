@@ -45,11 +45,25 @@ int zbc_get_sysfs_device_val_ull(char *dev_name, const char *attr,
 int zbc_get_sysfs_device_str(char *dev_name, const char *attr,
 			     char *str, int max_len);
 
+/** @brief Opaque device handle (forward declaration). */
 struct zbc_device;
+/** @brief Zone descriptor (forward declaration, defined in libzbc/zbc.h). */
 struct zbc_zone;
 
 /**
  * Check that a zone write pointer is within the zone bounds.
+ *
+ * @brief Check that a zone write pointer is within the zone bounds.
+ *
+ * For sequential and SOBR zones with a condition for which the write pointer
+ * is valid, check that the write pointer lies within
+ * [zone start, zone start + zone length].
+ *
+ * @param[in] dev	Device the zone descriptor was reported by
+ * @param[in] zone	Zone descriptor to check
+ * @param[in] idx	Index of the zone descriptor in the REPORT ZONES reply
+ *
+ * @return 0 if the write pointer is valid or not checked, -EIO otherwise.
  */
 int zbc_zone_check_wp(struct zbc_device *dev, struct zbc_zone *zone,
 		      unsigned int idx);
