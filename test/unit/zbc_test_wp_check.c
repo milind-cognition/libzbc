@@ -7,29 +7,55 @@
  * (zbc_zone_check_wp()) using synthetic zone descriptors.
  * No zoned device is needed.
  */
+
+/**
+ * @file zbc_test_wp_check.c
+ * @brief Unit test for zbc_zone_check_wp().
+ *
+ * Feeds synthetic zone descriptors built from the FWVAL-4471 zone 1873
+ * geometry to zbc_zone_check_wp() and compares the result of each case
+ * against the expected return value. Runs under "make check".
+ */
 #include <stdio.h>
 #include <errno.h>
 
 #include "zbc.h"
 #include "zbc_utils.h"
 
+/**
+ * @brief Library log level, defined here since lib/zbc.c is not linked.
+ *
+ * Set to ZBC_LOG_ERROR so the out of range write pointer errors reported
+ * by zbc_zone_check_wp() are printed.
+ */
 int zbc_log_level = ZBC_LOG_ERROR;
 
 /* Zone 1873 from FWVAL-4471 */
+/** @brief Start sector of the test zone (zone 1873 in FWVAL-4471). */
 #define Z_START	0x3A880000ULL
+/** @brief Length in sectors of the test zone. */
 #define Z_LEN	0x80000ULL
+/** @brief End sector of the test zone (first sector after the zone). */
 #define Z_END	(Z_START + Z_LEN)
 
+/**
+ * @brief Write pointer check test case.
+ */
 struct wp_case {
-	const char	*name;
-	uint8_t		type;
-	uint8_t		cond;
-	uint64_t	start;
-	uint64_t	len;
-	uint64_t	wp;
-	int		expected;
+	const char	*name;		/**< Test case description */
+	uint8_t		type;		/**< Zone type (enum zbc_zone_type) */
+	uint8_t		cond;		/**< Zone condition
+					     (enum zbc_zone_condition) */
+	uint64_t	start;		/**< Zone start sector */
+	uint64_t	len;		/**< Zone length in sectors */
+	uint64_t	wp;		/**< Reported write pointer sector */
+	int		expected;	/**< Expected zbc_zone_check_wp()
+					     return value */
 };
 
+/**
+ * @brief Test cases: valid, out of range and unchecked write pointers.
+ */
 static const struct wp_case cases[] = {
 	{ "SWR imp open, wp inside zone", ZBC_ZT_SEQUENTIAL_REQ,
 	  ZBC_ZC_IMP_OPEN, Z_START, Z_LEN, Z_START + 0x1000, 0 },
@@ -64,6 +90,13 @@ static const struct wp_case cases[] = {
 	  ZBC_ZC_NOT_WP, Z_START, Z_LEN, (uint64_t)-1, 0 },
 };
 
+/**
+ * @brief Run all write pointer check test cases.
+ *
+ * Each case is reported as PASS or FAIL on stdout, followed by a summary.
+ *
+ * @return 0 if all cases passed, 1 otherwise.
+ */
 int main(void)
 {
 	char name[] = "synthetic";
