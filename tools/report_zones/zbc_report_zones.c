@@ -133,7 +133,7 @@ static void zbc_report_print_zone_csv(struct zbc_device_info *info,
 		has_wp = zbc_zone_condition(z) == ZBC_ZC_IMP_OPEN ||
 			 zbc_zone_condition(z) == ZBC_ZC_EMPTY;
 	else
-		has_wp = zbc_zone_sequential(z);
+		has_wp = zbc_zone_sequential(z) && !zbc_zone_inactive(z);
 
 	printf("%d,%s,%s,%llu,%llu,",
 	       zno,
