@@ -128,7 +128,7 @@ static bool zbc_report_zone_has_wp(const struct zbc_zone *z)
 }
 
 static void zbc_report_print_zone_csv(struct zbc_device_info *info,
-				      struct zbc_zone *z, int zno,
+				      const struct zbc_zone *z, int zno,
 				      bool lba_unit)
 {
 	printf("%d,0x%x,0x%x,%llu,%llu,",
