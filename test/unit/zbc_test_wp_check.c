@@ -1,6 +1,9 @@
 // SPDX-License-Identifier: BSD-2-Clause
 // SPDX-License-Identifier: LGPL-3.0-or-later
-/*
+/**
+ * @file zbc_test_wp_check.c
+ * @brief Host-runnable regression check for zbc_zone_check_wp().
+ *
  * This file is part of libzbc.
  *
  * Copyright (C) 2020, Western Digital. All rights reserved.
@@ -16,22 +19,34 @@
 #include "zbc.h"
 #include "zbc_utils.h"
 
+/**
+ * @brief Library log level, defined here since the test links the library
+ *        sources directly. Only errors are printed.
+ */
 int zbc_log_level = ZBC_LOG_ERROR;
 
 /* Zone 1873 from FWVAL-4471: start 0x3A880000, length 0x80000 */
+/** @brief Start sector of the test zone (zone 1873 from FWVAL-4471). */
 #define ZSTART	0x3A880000ULL
+/** @brief Length in sectors of the test zone (zone 1873 from FWVAL-4471). */
 #define ZLEN	0x80000ULL
 
+/**
+ * @brief A single write pointer check test case.
+ */
 struct wp_test {
-	const char	*name;
-	uint8_t		type;
-	uint8_t		cond;
-	uint64_t	start;
-	uint64_t	len;
-	uint64_t	wp;
-	int		expected;
+	const char	*name;		/**< Test case description */
+	uint8_t		type;		/**< Zone type (enum zbc_zone_type) */
+	uint8_t		cond;		/**< Zone condition (enum zbc_zone_condition) */
+	uint64_t	start;		/**< Zone start sector */
+	uint64_t	len;		/**< Zone length in sectors */
+	uint64_t	wp;		/**< Zone write pointer sector */
+	int		expected;	/**< Expected zbc_zone_check_wp() result */
 };
 
+/**
+ * @brief Test cases: valid, out-of-range and unchecked write pointers.
+ */
 static struct wp_test tests[] = {
 	{ "valid wp (empty, wp == start)", ZBC_ZT_SEQUENTIAL_REQ,
 	  ZBC_ZC_EMPTY, ZSTART, ZLEN, ZSTART, 0 },
@@ -63,6 +78,13 @@ static struct wp_test tests[] = {
 	  ZBC_ZC_NOT_WP, ZSTART, ZLEN, (uint64_t)-1, 0 },
 };
 
+/**
+ * @brief Run all test cases against zbc_zone_check_wp().
+ *
+ * Each case is printed as PASS or FAIL, followed by a summary line.
+ *
+ * @return EXIT_SUCCESS if all test cases pass, EXIT_FAILURE otherwise.
+ */
 int main(void)
 {
 	struct zbc_device dev = { .zbd_filename = "synthetic" };
