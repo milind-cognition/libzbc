@@ -12,7 +12,9 @@
 #include <stdlib.h>
 #include <libgen.h>
 #include <string.h>
+#include <unistd.h>
 
+#include "zbc.h"
 #include "zbc_utils.h"
 
 /**
@@ -165,4 +167,45 @@ int zbc_get_sysfs_device_str(char *dev_name, const char *attr,
 {
 	return zbc_get_sysfs_group_val_str(dev_name, "device", attr,
 					   str, max_len);
+}
+
+/**
+ * zbc_zone_check_wp - Check a zone write pointer against the zone bounds
+ * @dev:	Device the zone descriptor was reported by
+ * @zone:	Zone descriptor to check
+ * @idx:	Index of the zone descriptor in the REPORT ZONES reply
+ *
+ * For sequential and SOBR zones with a condition for which the write pointer
+ * is valid (i.e. not FULL, READ ONLY, OFFLINE, INACTIVE or NOT WP), check that
+ * the zone write pointer lies within [zone start, zone start + zone length].
+ *
+ * @return 0 if the write pointer is valid or not checked, -EIO otherwise.
+ */
+int zbc_zone_check_wp(struct zbc_device *dev, struct zbc_zone *zone,
+		      unsigned int idx)
+{
+	uint64_t start = zone->zbz_start;
+	uint64_t len = zone->zbz_length;
+	uint64_t wp = zone->zbz_write_pointer;
+
+	if (!zbc_zone_sequential(zone) && !zbc_zone_sobr(zone))
+		return 0;
+
+	if (zbc_zone_full(zone) || zbc_zone_rdonly(zone) ||
+	    zbc_zone_offline(zone) || zbc_zone_inactive(zone) ||
+	    zbc_zone_not_wp(zone))
+		return 0;
+
+	if (wp >= start && wp - start <= len)
+		return 0;
+
+	zbc_error("%s: Zone %u (type 0x%x, cond 0x%x): invalid write pointer "
+		  "(start %llu, length %llu, wp %llu)\n",
+		  dev->zbd_filename, idx,
+		  zone->zbz_type, zone->zbz_condition,
+		  (unsigned long long)start,
+		  (unsigned long long)len,
+		  (unsigned long long)wp);
+
+	return -EIO;
 }
