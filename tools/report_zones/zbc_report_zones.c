@@ -189,6 +189,7 @@ int main(int argc, char **argv)
 	struct zbc_zone *z, *zones = NULL;
 	bool lba_unit = false;
 	bool csv = false;
+	bool verbose = false;
 	unsigned long long start = 0;
 	int i, ret = 1, oflags = 0;
 	int num = 0;
@@ -207,6 +208,7 @@ int main(int argc, char **argv)
 
 		if (strcmp(argv[i], "-v") == 0) {
 
+			verbose = true;
 			zbc_set_log_level("debug");
 
 		} else if (strcmp(argv[i], "-scsi") == 0) {
@@ -321,6 +323,11 @@ int main(int argc, char **argv)
 
 	if (csv && num) {
 		fprintf(stderr, "-csv and -n options are mutually exclusive\n");
+		return 1;
+	}
+
+	if (csv && verbose) {
+		fprintf(stderr, "-csv and -v options are mutually exclusive\n");
 		return 1;
 	}
 
