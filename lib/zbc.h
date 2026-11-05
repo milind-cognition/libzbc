@@ -360,6 +360,50 @@ extern int zbc_log_level;
 				  # cond);			\
 	} while (0)
 
+/**
+ * @brief Check that a zone write pointer is within the zone boundaries
+ * @param[in] filename	Device file name (used for error messages)
+ * @param[in] idx	Index of the zone descriptor in the report
+ * @param[in] zone	Zone to check
+ *
+ * For sequential write required, sequential write preferred and
+ * sequential or before required zones, check that the zone write pointer
+ * reported by the device satisfies zone start <= write pointer <=
+ * zone start + zone length. Zones in the FULL, READ ONLY, OFFLINE,
+ * INACTIVE and NOT WRITE POINTER conditions are not checked since the
+ * write pointer value reported by the device is invalid in these
+ * conditions.
+ *
+ * @return 0 if the write pointer is valid or not checked, -EIO otherwise.
+ */
+static inline int zbc_zone_check_wp(const char *filename, unsigned int idx,
+				    const struct zbc_zone *zone)
+{
+	if (!zbc_zone_sequential(zone) && !zbc_zone_sobr(zone))
+		return 0;
+
+	if (zbc_zone_full(zone) ||
+	    zbc_zone_rdonly(zone) ||
+	    zbc_zone_offline(zone) ||
+	    zbc_zone_inactive(zone) ||
+	    zbc_zone_not_wp(zone))
+		return 0;
+
+	/* Written to avoid overflow of zbz_start + zbz_length */
+	if (zone->zbz_write_pointer < zone->zbz_start ||
+	    zone->zbz_write_pointer - zone->zbz_start > zone->zbz_length) {
+		zbc_error("%s: Zone %u (start %llu, length %llu): "
+			  "invalid write pointer %llu\n",
+			  filename, idx,
+			  zbc_zone_start(zone),
+			  zbc_zone_length(zone),
+			  zbc_zone_wp(zone));
+		return -EIO;
+	}
+
+	return 0;
+}
+
 #endif
 
 /* __LIBZBC_INTERNAL_H__ */
