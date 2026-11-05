@@ -45,5 +45,14 @@ int zbc_get_sysfs_device_val_ull(char *dev_name, const char *attr,
 int zbc_get_sysfs_device_str(char *dev_name, const char *attr,
 			     char *str, int max_len);
 
+struct zbc_device;
+struct zbc_zone;
+
+/**
+ * Check that a reported zone write pointer lies within the zone.
+ */
+int zbc_zone_check_wp(struct zbc_device *dev, unsigned int idx,
+		      struct zbc_zone *zone);
+
 #endif /* __LIBZBC_UTILS_H__ */
 

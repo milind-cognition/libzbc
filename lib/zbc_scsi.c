@@ -11,6 +11,7 @@
  */
 #include "zbc.h"
 #include "zbc_sg.h"
+#include "zbc_utils.h"
 
 #include <unistd.h>
 #include <stdlib.h>
@@ -570,6 +571,12 @@ static int zbc_scsi_do_report_zones(struct zbc_device *dev, uint64_t sector,
 				zbc_dev_lba2sect(dev, zbc_sg_get_int64(&buf[24]));
 		else
 			zones[i].zbz_write_pointer = (uint64_t)-1;
+
+		ret = zbc_zone_check_wp(dev, i, &zones[i]);
+		if (ret) {
+			nz = i;
+			goto out;
+		}
 
 		buf += ZBC_ZONE_DESCRIPTOR_LENGTH;
 
