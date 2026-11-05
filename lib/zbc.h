@@ -375,6 +375,9 @@ extern int zbc_log_level;
  * conditions.
  *
  * @return 0 if the write pointer is valid or not checked, -EIO otherwise.
+ * @retval 0	The zone is not checked or its write pointer is valid
+ * @retval -EIO	The zone write pointer is out of range (an error
+ *		message is logged with zbc_error())
  */
 static inline int zbc_zone_check_wp(const char *filename, unsigned int idx,
 				    const struct zbc_zone *zone)

@@ -1716,7 +1716,31 @@ static int zbc_ata_flush(struct zbc_device *dev)
 }
 
 /**
- * Get device zone information.
+ * @brief Get device zone information.
+ *
+ * Issue an ATA REPORT ZONES EXT command (ZAC MANAGEMENT IN) using ATA16
+ * passthrough and parse the returned zone descriptors.
+ *
+ * @param[in] dev	Device handle
+ * @param[in] sector	Start sector (512B unit) of the report
+ * @param[in] ro	Zone reporting options
+ * @param[out] max_lba	If not NULL, set to the device maximum LBA
+ *			returned in the report header
+ * @param[out] zones	Array of zones to fill. May be NULL to only
+ *			get the number of zones and the maximum LBA
+ * @param[in,out] nr_zones	On input, the maximum number of zones that
+ *				@a zones can hold. On output, the number of
+ *				zone descriptors parsed and returned
+ * @param[in] bufsz	Size in bytes of the report buffer to allocate
+ *
+ * The write pointer of each parsed zone descriptor is validated with
+ * zbc_zone_check_wp(). If an invalid write pointer is found, parsing
+ * stops, @a nr_zones is set to the number of valid zones parsed before
+ * the faulty descriptor, and -EIO is returned so that callers never get
+ * a zone with an out-of-range write pointer.
+ *
+ * @return 0 on success, -EIO if the reply is too short or a zone write
+ * pointer is out of range, or another negative errno value on failure.
  */
 static int zbc_ata_do_report_zones(struct zbc_device *dev, uint64_t sector,
 			enum zbc_zone_reporting_options ro, uint64_t *max_lba,
