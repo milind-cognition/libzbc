@@ -9,6 +9,17 @@
  * REPORT ZONES zone descriptors to the write pointer validation helper.
  * No zoned device is needed.
  */
+
+/**
+ * @file zbc_test_wp_check.c
+ * @brief Unit test for zbc_zone_check_wp()
+ *
+ * Builds synthetic zone descriptors (including the zone reported in alert
+ * FWVAL-4471) and checks that zbc_zone_check_wp() accepts valid write
+ * pointers, rejects out-of-range write pointers with -EIO and ignores the
+ * write pointer of zones in conditions where it is not valid.
+ * Run by "make check".
+ */
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
@@ -16,19 +27,41 @@
 
 #include "zbc.h"
 
+/**
+ * @brief One write pointer check test case
+ *
+ * Describes a synthetic zone descriptor and the value that
+ * zbc_zone_check_wp() is expected to return for it.
+ */
 struct wp_case {
-	const char		*name;
-	enum zbc_zone_type	type;
-	enum zbc_zone_condition	cond;
-	uint64_t		start;
-	uint64_t		length;
-	uint64_t		wp;
-	int			expected;
+	const char		*name;		/**< Test case description */
+	enum zbc_zone_type	type;		/**< Zone type */
+	enum zbc_zone_condition	cond;		/**< Zone condition */
+	uint64_t		start;		/**< Zone start (512B sectors) */
+	uint64_t		length;		/**< Zone length (512B sectors) */
+	uint64_t		wp;		/**< Write pointer (512B sectors) */
+	int			expected;	/**< Expected return value */
 };
 
 /* FWVAL-4471: zone 1873, SWR, IMP_OPEN */
+/**
+ * @brief Start sector of the zone reported in alert FWVAL-4471 (zone 1873)
+ */
 #define ALERT_START	0x3A880000ULL
+
+/**
+ * @brief Length in sectors of the zone reported in alert FWVAL-4471
+ */
 #define ALERT_LEN	0x80000ULL
+
+/**
+ * @brief Test cases run by main()
+ *
+ * Covers valid write pointers (zone start, inside the zone, zone end),
+ * out-of-range write pointers (past the zone end, before the zone start,
+ * 64-bit overflow) and zones whose write pointer is not checked (FULL,
+ * READ ONLY, OFFLINE, INACTIVE, NOT WP and conventional zones).
+ */
 
 static const struct wp_case cases[] = {
 	{ "SWR wp == start", ZBC_ZT_SEQUENTIAL_REQ, ZBC_ZC_EMPTY,
@@ -62,6 +95,15 @@ static const struct wp_case cases[] = {
 	  0, ALERT_LEN, (uint64_t)-1, 0 },
 };
 
+/**
+ * @brief Run all write pointer check test cases
+ *
+ * Calls zbc_zone_check_wp() on a zone built from each entry of @c cases
+ * using a synthetic device handle, and prints a PASS or FAIL line for
+ * each case followed by a summary.
+ *
+ * @return 0 if all test cases passed, 1 otherwise.
+ */
 int main(void)
 {
 	struct zbc_device dev = { .zbd_filename = "synthetic" };
