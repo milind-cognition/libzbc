@@ -46,6 +46,9 @@ tools/zbc_zone_activate
 tools/zbc_dev_control
 tools/gzbc
 tools/gzviewer
+test/unit/zbc_test_wp_check
+test/unit/*.log
+test/unit/*.trs
 
 # Generated files
 *.desktop

@@ -6,7 +6,7 @@
 
 ACLOCAL_AMFLAGS = -I m4
 
-SUBDIRS = lib tools
+SUBDIRS = lib tools test/unit
 if BUILD_TEST
 SUBDIRS += test/programs
 endif
