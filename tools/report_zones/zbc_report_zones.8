@@ -39,6 +39,16 @@ By default, zone information use 512B sector unit regardless of the device logic
 block size. This option forces displaying zone information using the device
 logical block size (LBA) as the unit.
 .TP
+.BR \-csv
+Display zone information as comma-separated values, one zone per line, preceded
+by the header line \fBzone,type,cond,start,len,wp\fR. The zone type and
+condition are hexadecimal codes (e.g. \fB0x2\fR) and the start, length and
+write pointer values use the unit selected with \fB-lba\fR. The write pointer
+column is left empty for zones that have no valid write pointer (e.g.
+conventional zones). Device information and summary lines are not displayed
+and warnings are written to standard error. This option cannot be used together
+with \fB-n\fR or \fB-v\fR.
+.TP
 .BR \-start " " \fIsector\fR
 Display information on zones starting from the zone including the specified
 sector. If the option \fB-lba\fR is used, \fIsector\fR is interpreted as a
